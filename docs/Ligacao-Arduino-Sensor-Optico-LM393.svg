@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#081322"/>
+      <stop offset="1" stop-color="#12283c"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity=".38"/>
+    </filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0,0 L10,5.5 L0,11 Z" fill="context-stroke"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <text x="800" y="74" fill="#fff" font-family="Arial, sans-serif" font-size="42" font-weight="700" text-anchor="middle">LIGAÇÃO DO SENSOR ÓPTICO LM393</text>
+  <text x="800" y="116" fill="#a9bfd2" font-family="Arial, sans-serif" font-size="24" text-anchor="middle">Arduino Uno/Nano • módulo de fenda MH-Sensor-Series</text>
+
+  <!-- Arduino -->
+  <g>
+    <rect x="110" y="180" width="560" height="650" rx="38" fill="#087e83" stroke="#63e1df" stroke-width="5"/>
+    <rect x="148" y="224" width="484" height="566" rx="24" fill="#096a70" stroke="#0f4f58" stroke-width="3"/>
+    <rect x="112" y="310" width="78" height="140" rx="10" fill="#bec9cc" stroke="#edf4f5" stroke-width="4"/>
+    <rect x="110" y="580" width="68" height="90" rx="8" fill="#20272c" stroke="#8d999f" stroke-width="4"/>
+    <text x="390" y="292" fill="#fff" font-family="Arial, sans-serif" font-size="40" font-weight="700" text-anchor="middle">ARDUINO</text>
+    <text x="390" y="335" fill="#baf8f6" font-family="Arial, sans-serif" font-size="27" text-anchor="middle">UNO ou NANO</text>
+    <rect x="280" y="408" width="220" height="160" rx="16" fill="#1b242a" stroke="#9db3bc" stroke-width="3"/>
+    <text x="390" y="498" fill="#dcebf0" font-family="monospace" font-size="30" text-anchor="middle">ATmega328P</text>
+  </g>
+
+  <!-- Arduino pins -->
+  <g font-family="Arial, sans-serif" font-size="25" font-weight="700">
+    <circle cx="625" cy="395" r="17" fill="#ed394e" stroke="#fff" stroke-width="3"/>
+    <text x="580" y="404" fill="#fff" text-anchor="end">5V</text>
+    <circle cx="625" cy="505" r="17" fill="#222" stroke="#fff" stroke-width="3"/>
+    <text x="580" y="514" fill="#fff" text-anchor="end">GND</text>
+    <circle cx="625" cy="615" r="17" fill="#ffbf2f" stroke="#fff" stroke-width="3"/>
+    <text x="580" y="624" fill="#fff" text-anchor="end">D4</text>
+    <circle cx="625" cy="725" r="17" fill="#30a9ff" stroke="#fff" stroke-width="3"/>
+    <text x="580" y="734" fill="#fff" text-anchor="end">A0</text>
+  </g>
+
+  <!-- Sensor -->
+  <g>
+    <rect x="1030" y="235" width="450" height="540" rx="30" fill="#236eb7" stroke="#78c3ff" stroke-width="5"/>
+    <text x="1255" y="302" fill="#fff" font-family="Arial, sans-serif" font-size="34" font-weight="700" text-anchor="middle">SENSOR ÓPTICO</text>
+    <text x="1255" y="340" fill="#c8e8ff" font-family="Arial, sans-serif" font-size="25" text-anchor="middle">LM393 • módulo de fenda</text>
+
+    <!-- fork -->
+    <path d="M1140 390 H1205 V515 H1305 V390 H1370 V590 H1140 Z" fill="#171d22" stroke="#91a0a8" stroke-width="5"/>
+    <rect x="1205" y="390" width="100" height="125" fill="#0d1824"/>
+    <line x1="1215" y1="454" x2="1295" y2="454" stroke="#ff4058" stroke-width="6" stroke-dasharray="12 8"/>
+    <text x="1255" y="635" fill="#d9efff" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">palheta atravessa a fenda</text>
+  </g>
+
+  <!-- Sensor pins -->
+  <g font-family="Arial, sans-serif" font-size="25" font-weight="700">
+    <circle cx="1075" cy="395" r="17" fill="#ed394e" stroke="#fff" stroke-width="3"/>
+    <text x="1120" y="404" fill="#fff">VCC</text>
+    <circle cx="1075" cy="505" r="17" fill="#222" stroke="#fff" stroke-width="3"/>
+    <text x="1120" y="514" fill="#fff">GND</text>
+    <circle cx="1075" cy="615" r="17" fill="#ffbf2f" stroke="#fff" stroke-width="3"/>
+    <text x="1120" y="624" fill="#fff">D0</text>
+    <circle cx="1075" cy="725" r="17" fill="#30a9ff" stroke="#fff" stroke-width="3"/>
+    <text x="1120" y="734" fill="#fff">A0</text>
+  </g>
+
+  <!-- wires -->
+  <g fill="none" stroke-width="13" stroke-linecap="round">
+    <path d="M647 395 C770 395 920 395 1052 395" stroke="#ed394e"/>
+    <path d="M647 505 C770 505 920 505 1052 505" stroke="#15191c"/>
+    <path d="M647 615 C770 615 920 615 1052 615" stroke="#ffbf2f"/>
+    <path d="M647 725 C770 725 920 725 1052 725" stroke="#30a9ff"/>
+  </g>
+  <rect x="150" y="875" width="1300" height="72" rx="24" fill="#0b1725" stroke="#2f516a" stroke-width="2"/>
+  <text x="800" y="920" fill="#e5f4ff" font-family="Arial, sans-serif" font-size="26" text-anchor="middle">
+    Palheta padrão = 20 mm • firmware: ARDUINO_SENSOR_DE_FEIXE_LM393.ino
+  </text>
+</svg>

@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="SpriteFrames" path="res://assets/personagem/sprites/lutador_sprite_frames.tres" id="1_frames"]
+
+[node name="LutadorSprite" type="AnimatedSprite2D"]
+sprite_frames = ExtResource("1_frames")
+animation = &"guarda"
+centered = true
+texture_filter = 1

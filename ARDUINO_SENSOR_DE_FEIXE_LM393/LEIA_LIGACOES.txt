@@ -1,0 +1,58 @@
+FIRMWARE DEFINITIVO - SENSOR DE FEIXE LM393
+===========================================
+
+Grave o arquivo ARDUINO_SENSOR_DE_FEIXE_LM393.ino no Arduino Uno/Nano.
+
+SENSOR:
+  VCC -> 5V
+  GND -> GND
+  D0  -> D4   (medicao rapida por interrupcao PCINT20)
+  A0  -> A0   (diagnostico na Central Tecnica)
+
+BOTOES:
+  START  -> D2 e GND
+  CREDIT -> D3 e GND
+
+FITAS WS2812B:
+  dados esquerda -> D5
+  dados direita  -> D6
+  alimentacao por fonte 5V externa, com GND comum ao Arduino
+  biblioteca: Adafruit NeoPixel
+
+FUNCIONAMENTO DOS DOIS SOCOS:
+  O jogo envia ARM antes do primeiro soco e envia outro ARM ao rearmar o
+  segundo. Cada ARM limpa bordas antigas e permite exatamente um HIT. Um
+  retorno da palheta nao gasta o segundo soco.
+
+MEDIDA:
+  velocidade = largura da palheta / tempo de bloqueio do feixe
+
+Padrao: palheta 20 mm, pulso minimo 0,70 ms, polaridade AUTO. Ligue a
+maquina com a fenda livre. A palheta deve entrar e sair completamente.
+
+
+MOTOR DO SACO (opcional)
+------------------------
+O saco desce no START e sobe no fim da rodada. Sem ele ligado, o jogo
+funciona exatamente igual.
+
+  D7  -> IN1 da ponte H  (DESCE)
+  D8  -> IN2 da ponte H  (SOBE)
+  D10 -> fim de curso DE BAIXO, contato para GND  (opcional)
+  D11 -> fim de curso DE CIMA,  contato para GND  (opcional)
+
+A ponte H tem fonte PROPRIA para o motor. O GND dela e o GND do Arduino
+precisam estar juntos, senao os comandos chegam como ruido.
+
+AS DUAS SAIDAS NUNCA FICAM ALTAS AO MESMO TEMPO. Numa ponte H isso e
+conducao cruzada e queima o componente; num par de reles e um curto entre
+as duas polaridades. O firmware garante isso num lugar so (motorParar).
+
+O CURSO E POR TEMPO, ajustado na Central em "MOTOR DO SACO". Meça quanto
+o seu motor leva de cima a baixo e ponha esse valor mais uns 10%. Os fins
+de curso, se existirem, param antes; o tempo e o teto que vale mesmo se
+um deles falhar.
+
+PRIMEIRA VEZ: use o botao SOBE da Central com o saco a meia altura e
+confira que ele sobe. Se descer, inverta os dois fios do motor na ponte H
+(nao mexa no D7/D8).

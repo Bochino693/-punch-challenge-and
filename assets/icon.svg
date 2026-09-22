@@ -1,0 +1,22 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Punch Challenge — Lazer & Sport. Tema claro: placa creme com
+       moldura marinho, luva vermelha e raios de impacto em âmbar. -->
+  <rect x="14" y="14" width="484" height="484" rx="112" fill="#1c3566"/>
+  <rect x="34" y="34" width="444" height="444" rx="94" fill="#fff8ec"/>
+  <g stroke="#f2a007" stroke-width="18" stroke-linecap="round">
+    <path d="M311 148l22-42M201 148l-22-42M375 214l43-22M137 214l-43-22M363 330l43 22M149 330l-43 22M311 396l22 42M201 396l-22 42"/>
+  </g>
+  <g>
+    <circle cx="271" cy="223" r="111" fill="#1c3566"/>
+    <circle cx="169" cy="265" r="60" fill="#1c3566"/>
+    <rect x="171" y="202" width="188" height="99" rx="30" fill="#1c3566"/>
+    <rect x="205" y="283" width="135" height="105" rx="30" fill="#1c3566"/>
+    <circle cx="271" cy="223" r="96" fill="#e63950"/>
+    <circle cx="169" cy="265" r="45" fill="#e63950"/>
+    <rect x="186" y="217" width="158" height="69" rx="24" fill="#e63950"/>
+    <rect x="220" y="298" width="105" height="75" rx="24" fill="#e63950"/>
+  </g>
+  <g stroke="#ffffff" stroke-width="17" stroke-linecap="round">
+    <path d="M220 229h87"/><path d="M226 325h57"/>
+  </g>
+</svg>

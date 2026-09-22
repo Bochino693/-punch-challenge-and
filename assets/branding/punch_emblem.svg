@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900">
+ <defs>
+  <linearGradient id="shield" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#ff3445"/><stop offset=".5" stop-color="#e30b22"/><stop offset="1" stop-color="#760718"/></linearGradient>
+  <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff8a6"/><stop offset=".5" stop-color="#ffe033"/><stop offset="1" stop-color="#ff9a0a"/></linearGradient>
+ </defs>
+ <path d="M450 46 788 214 750 570 450 848 150 570 112 214Z" fill="#270710" stroke="#ffdd2d" stroke-width="18"/>
+ <path d="M450 83 752 233 716 552 450 799 184 552 148 233Z" fill="url(#shield)"/>
+ <path d="M450 108 727 246M177 256 206 532" fill="none" stroke="#fff7e9" stroke-width="8" opacity=".75"/>
+ <path d="m313 167 137-64 137 64-137 72Z" fill="#ffda2a" opacity=".14"/>
+ <!-- Luva fechada: punho branco, costura escura e braçadeira amarela. -->
+ <path d="M300 545 270 450Q245 414 260 372L287 308Q300 275 331 278L374 287Q391 253 426 259L479 272Q504 250 535 273L588 304Q625 298 644 337L663 383Q681 422 655 462L599 552 574 630 345 630Z" fill="#fff9ed" stroke="#500719" stroke-width="16" stroke-linejoin="round"/>
+ <path d="m300 366 39 21 20 65M381 314l36 20 13 78M472 306l31 23 8 67M566 339l29 24 3 34" fill="none" stroke="#d7b0a8" stroke-width="14" stroke-linecap="round"/>
+ <path d="M291 454q74-73 109-16l39 51q39 48 114 34" fill="none" stroke="#500719" stroke-width="17" stroke-linecap="round"/>
+ <path d="M341 594h244l-19 99H362Z" fill="url(#gold)" stroke="#500719" stroke-width="14"/>
+ <path d="m470 550-54 84h44l-18 73 70-101h-46Z" fill="#e81329"/>
+ <path d="m219 377-64-38 17 93 54-14M677 377l65-38-17 93-53-14" fill="url(#gold)"/>
+</svg>

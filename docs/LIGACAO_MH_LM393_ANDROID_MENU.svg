@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+  <defs>
+    <style>
+      .bg{fill:#0e1118}.panel{fill:#171c27;stroke:#68738a;stroke-width:3}.title{fill:#fff;font:bold 34px Arial}.h{fill:#ffd34d;font:bold 24px Arial}.t{fill:#eef2f8;font:19px Arial}.small{fill:#bfc8d8;font:16px Arial}.pin{fill:#111621;stroke:#dce3ef;stroke-width:2}.sig{stroke:#ffd34d;stroke-width:6;fill:none}.pwr{stroke:#ff4b55;stroke-width:6;fill:none}.gnd{stroke:#69a7ff;stroke-width:6;fill:none}.motor{stroke:#fa8cff;stroke-width:7;fill:none}.usb{stroke:#53e0c1;stroke-width:8;fill:none}.warn{fill:#ffdfdf;font:bold 18px Arial}.badge{fill:#7b2330}.node{fill:#252c3a;stroke:#8995ac;stroke-width:2}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#53e0c1"/></marker>
+  </defs>
+  <rect class="bg" width="1600" height="1100"/>
+  <text class="title" x="60" y="60">PUNCH CHALLENGE — LIGAÇÃO ANDROID + ARDUINO NANO + MH/LM393</text>
+  <text class="small" x="60" y="92">Firmware: ARDUINO_SENSOR_DE_FEIXE_LM393.ino • botões usam INPUT_PULLUP • todos os GNDs de lógica em comum</text>
+
+  <rect class="panel" x="610" y="135" width="380" height="780" rx="28"/>
+  <text class="h" x="706" y="178">ARDUINO NANO</text>
+  <rect class="node" x="690" y="205" width="220" height="650" rx="18"/>
+  <text class="t" x="720" y="245">USB → TV BOX</text>
+  <g class="t">
+    <rect class="pin" x="625" y="285" width="95" height="42"/><text x="646" y="313">D2</text>
+    <rect class="pin" x="625" y="345" width="95" height="42"/><text x="646" y="373">D3</text>
+    <rect class="pin" x="625" y="405" width="95" height="42"/><text x="646" y="433">D4</text>
+    <rect class="pin" x="625" y="465" width="95" height="42"/><text x="646" y="493">A0</text>
+    <rect class="pin" x="625" y="525" width="95" height="42"/><text x="646" y="553">D9</text>
+    <rect class="pin" x="625" y="605" width="95" height="42"/><text x="646" y="633">5V</text>
+    <rect class="pin" x="625" y="665" width="95" height="42"/><text x="638" y="693">GND</text>
+    <rect class="pin" x="880" y="285" width="95" height="42"/><text x="902" y="313">D5</text>
+    <rect class="pin" x="880" y="345" width="95" height="42"/><text x="902" y="373">D6</text>
+    <rect class="pin" x="880" y="405" width="95" height="42"/><text x="902" y="433">D7</text>
+    <rect class="pin" x="880" y="465" width="95" height="42"/><text x="902" y="493">D8</text>
+    <rect class="pin" x="880" y="525" width="95" height="42"/><text x="895" y="553">D10</text>
+    <rect class="pin" x="880" y="585" width="95" height="42"/><text x="895" y="613">D11</text>
+  </g>
+
+  <rect class="panel" x="60" y="140" width="450" height="300" rx="20"/>
+  <text class="h" x="90" y="182">SENSOR DE FEIXE MH / LM393</text>
+  <text class="t" x="92" y="230">VCC</text><text class="t" x="92" y="280">GND</text><text class="t" x="92" y="330">DO</text><text class="t" x="92" y="380">AO</text>
+  <path class="pwr" d="M150 224 H555 V626 H625"/><text class="small" x="275" y="216">5 V</text>
+  <path class="gnd" d="M150 274 H570 V686 H625"/><text class="small" x="280" y="267">GND comum</text>
+  <path class="sig" d="M150 324 H530 V426 H625"/><text class="small" x="285" y="316">saída digital do comparador</text>
+  <path class="sig" d="M150 374 H545 V486 H625"/><text class="small" x="285" y="366">leitura analógica / diagnóstico</text>
+  <rect class="badge" x="78" y="400" width="410" height="26" rx="8"/><text x="88" y="419" style="fill:#ffdfdf;font:bold 15px Arial">AJUSTE O TRIMPOT: LED DO MUDA AO CORTAR O FEIXE</text>
+
+  <rect class="panel" x="60" y="480" width="450" height="420" rx="20"/>
+  <text class="h" x="90" y="523">BOTÕES (CONTATO NORMALMENTE ABERTO)</text>
+  <text class="t" x="95" y="580">START</text><circle class="node" cx="300" cy="575" r="24"/><path class="sig" d="M324 575 H530 V306 H625"/>
+  <text class="t" x="95" y="660">CRÉDITO</text><circle class="node" cx="300" cy="655" r="24"/><path class="sig" d="M324 655 H545 V366 H625"/>
+  <text class="t" x="95" y="740">MENU / CONFIG</text><circle class="node" cx="300" cy="735" r="24"/><path class="sig" d="M324 735 H575 V546 H625"/>
+  <path class="gnd" d="M276 575 H250 V830 H590 V686 H625 M276 655 H250 M276 735 H250"/>
+  <text class="small" x="92" y="866">Cada botão fecha seu pino diretamente no GND.</text>
+
+  <rect class="panel" x="1060" y="135" width="480" height="300" rx="20"/>
+  <text class="h" x="1090" y="178">FITAS WS2812B (FONTE 5 V EXTERNA)</text>
+  <text class="t" x="1100" y="235">Fita esquerda DIN ← 330 Ω ← D5</text>
+  <text class="t" x="1100" y="290">Fita direita DIN ← 330 Ω ← D6</text>
+  <text class="t" x="1100" y="345">+5 V ← fonte externa dimensionada</text>
+  <text class="t" x="1100" y="390">GND ← fonte + GND Arduino</text>
+  <path class="sig" d="M975 306 H1030 V229 H1060"/><path class="sig" d="M975 366 H1045 V284 H1060"/>
+  <text class="small" x="1088" y="420">Capacitor 1000 µF entre +5 V e GND junto às fitas.</text>
+
+  <rect class="panel" x="1060" y="470" width="480" height="430" rx="20"/>
+  <text class="h" x="1090" y="512">IBT-2 / BTS7960 + MOTOR</text>
+  <text class="t" x="1100" y="560">RPWM ← D7 (DESCER)</text>
+  <text class="t" x="1100" y="605">LPWM ← D8 (SUBIR)</text>
+  <text class="t" x="1100" y="650">R_EN + L_EN ← 5 V</text>
+  <text class="t" x="1100" y="695">VCC ← 5 V • GND ← GND comum</text>
+  <text class="t" x="1100" y="750">B+ / B− ← fonte própria do motor</text>
+  <text class="t" x="1100" y="795">M+ / M− ← motor do saco</text>
+  <path class="motor" d="M975 426 H1035 V554 H1060"/><path class="motor" d="M975 486 H1020 V599 H1060"/>
+  <rect class="badge" x="1085" y="825" width="430" height="56" rx="10"/>
+  <text class="warn" x="1100" y="850">NUNCA alimente motor ou fitas pelo 5 V do Nano.</text>
+  <text class="warn" x="1100" y="873">Use fusível e parada de emergência no motor.</text>
+
+  <rect class="panel" x="60" y="950" width="1480" height="105" rx="18"/>
+  <text class="h" x="90" y="989">TV BOX ANDROID 10 + HUB USB ALIMENTADO</text>
+  <text class="t" x="90" y="1025">TV Box → hub USB alimentado → (1) Arduino Nano  (2) webcam UVC. Aceite as duas janelas USB e a permissão CÂMERA.</text>
+</svg>

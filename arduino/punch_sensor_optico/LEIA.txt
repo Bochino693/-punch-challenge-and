@@ -1,0 +1,8 @@
+O firmware antigo desta pasta foi substituido.
+
+Use somente:
+
+  ARDUINO_SENSOR_DE_FEIXE_LM393\ARDUINO_SENSOR_DE_FEIXE_LM393.ino
+
+Essa pasta fica na raiz do projeto para nao ser confundida com o firmware
+MPU-6050 preservado em arduino\punch_sensor.

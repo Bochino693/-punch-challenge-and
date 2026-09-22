@@ -1,0 +1,31 @@
+PUNCH CHALLENGE - VERSAO PARA SENSOR OPTICO LM393
+=================================================
+
+FIRMWARE PARA GRAVAR:
+  ARDUINO_SENSOR_DE_FEIXE_LM393\ARDUINO_SENSOR_DE_FEIXE_LM393.ino
+
+LIGACAO:
+  Sensor VCC -> Arduino 5V
+  Sensor GND -> Arduino GND
+  Sensor D0  -> Arduino D4
+  Sensor A0  -> Arduino A0
+  START      -> Arduino D2 e GND
+  CREDIT     -> Arduino D3 e GND
+
+Uma palheta opaca precisa atravessar a fenda. O padrao e 20 mm de largura
+na direcao do movimento. Se a medida for diferente, abra F9 > Golpe e
+ajuste LARGURA DA PALHETA para a medida real.
+
+Ao ligar, deixe a fenda livre. Ajuste o potenciometro do modulo para que o
+LED D0 troque de estado uma vez quando a palheta entra e volte quando sai.
+
+CONFIGURACAO PADRAO:
+  polaridade: AUTO
+  largura: 20 mm
+  velocidade minima: 0,30 m/s
+  velocidade maxima: 5,20 m/s
+  pulso minimo: 0,70 ms
+
+O sensor mede velocidade pelo tempo de bloqueio do feixe. Nao mede forca
+em kg ou newtons. Use TESTAR SENSOR na Central para validar a comunicacao e
+depois passe a palheta para validar tambem cabo, sensor e mecanica.

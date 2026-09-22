@@ -1,0 +1,70 @@
+O LUTADOR AGORA E DESENHADO
+===========================
+
+O adversario da arena deixou de ser um corpo montado por codigo e passou
+a ser uma folha de nove ilustracoes:
+
+    assets/personagem/sprites/lutador_folha_3x3.png
+    assets/personagem/sprites/lutador_sprite_frames.tres
+
+O jogo carrega isso sozinho ao subir a arena. Nao ha nada a instalar, nem
+Python, nem Blender, nem passo manual: abrir o projeto no Godot 4 e rodar
+basta.
+
+O QUE MUDOU
+- o corpo procedural (aneis torneados, musculo modelado, sombreador de
+  desenho) foi APAGADO junto com os dois shaders dele. Ele funcionava e
+  custava onze chamadas de desenho, mas geometria feita de elipsoides
+  somados tem um teto de qualidade, e esse teto fica abaixo de uma
+  ilustracao;
+- o lutador continua DENTRO do mundo 3D, e nao numa camada por cima: o
+  ringue, a perspectiva, o tremor, as particulas, a luz ciano e magenta e
+  a camera que recua no impacto continuam valendo;
+- as nove poses sao desenhos parados. O que as faz mexer e o movimento
+  procedural em scripts/arena/lutador.gd: respiracao, recuo do golpe,
+  cambaleio, tombo, clarao e o tom que escurece conforme o dano;
+- a camera foi reenquadrada duas vezes: de pe ela afastou para a figura
+  caber inteira, e no nocaute ela AFASTA e baixa em vez de aproximar,
+  porque um corpo caido e largo.
+
+A ESCALA AGORA E MEDIDA, NAO ESTIMADA
+Este arquivo dizia que a figura ocupava "cerca de 86%" da celula de 426
+px. Nao ocupa: medindo o alfa da folha, ela vai da linha 2 (topo da
+cabeca) a linha 418 (sola do pe da frente), 97,9% da celula. Com os 86%
+supostos o lutador saia com 2,03 m em vez de 1,80 e estourava o
+enquadramento -- e a camera foi afastada tres vezes para compensar.
+Agora TOPO_DA_CABECA_PX e SOLA_DO_PE_PX saem da medida, e a camera se
+enquadra sozinha a partir delas.
+
+A LINHA DO CHAO E A BORDA DE BAIXO DA CELULA
+O lutador esta em guarda, um pe a frente do outro. No desenho o pe DE
+TRAS aparece mais ALTO (perspectiva: o chao sobe na tela conforme se
+afasta) e o pe DA FRENTE encosta na borda de baixo da celula. Seis das
+nove poses alcancam essa borda, e isso e o CERTO -- e onde fica o chao.
+
+Durante tres correcoes seguidas a medida procurou a sola na METADE
+ESQUERDA da folha, achou o pe de tras (linha 418) e chamou aquilo de
+chao. A bota da frente, oito pixels mais baixa, ficava enterrada no
+tapete e aparecia decepada. As duas botas estao INTEIRAS na arte; o que
+faltava era pousar a certa.
+
+A regra e: a figura encosta no chao pelo PONTO MAIS BAIXO dela.
+
+SE VOCE TROCAR A ARTE, desenhe a sola do pe da frente na ultima linha da
+celula. Uma pose de pe que nao alcance essa linha vai aparecer
+flutuando, e tests/test_folha_lutador.gd reprova.
+
+TROCAR A ARTE
+Substitua a folha e o .tres mantendo os nove nomes de pose: guarda, idle,
+preparado, jab, direto, impacto_corpo, impacto_forte, nocaute e
+recuperacao. O teste tests/test_arena.gd falha se faltar algum. Mantenha
+filter_clip = true nas nove regioes do .tres: as poses se tocam dentro da
+folha e sem isso o filtro linear cola um fiapo da pose vizinha no
+contorno de cada uma.
+
+MEDIR A FOLHA NOVA
+    godot --headless --path . --script tools/medir_folha.gd
+
+CONFERIR
+    godot --headless --path . --script tests/test_arena.gd
+    godot --headless --path . --script tests/test_folha_lutador.gd

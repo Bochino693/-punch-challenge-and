@@ -1,0 +1,37 @@
+PUNCH CHALLENGE ANDROID - CORRECAO 1.0.60
+
+PASTA QUE DEVE SER MANTIDA:
+C:\Users\LAZER GAMES\Documents\punch-finally-android\PunchChallenge-Android-TVBox
+
+1. Feche o Godot.
+2. Extraia o CONTEUDO deste ZIP diretamente na pasta acima.
+3. Quando o Windows perguntar, escolha SUBSTITUIR TODOS OS ARQUIVOS.
+4. Nao crie outra pasta e nao mova o projeto.
+5. Dentro da pasta do projeto, clique duas vezes em GERAR_APK_AGORA.bat.
+
+RESULTADO ESPERADO:
+build\android\PunchChallenge.apk
+
+O gerador agora instala o modelo Android diretamente, sem abrir o editor
+Godot na etapa que estava encerrando com signal 11. Ele tambem apaga qualquer
+APK antigo antes de compilar, para nunca confundir uma versao velha com a nova.
+
+A versao 1.0.60 tambem impede o AUSBC de procurar immersionbar 3.0.0 e
+webpdecoder 1.6.4.9.0, dependencias opcionais antigas que nao sao usadas pelo
+jogo e nao estao mais disponiveis nos repositorios configurados. A exclusao
+vale para o projeto raiz do Gradle e para todos os subprojetos.
+
+CAMERA 1.0.60:
+- cria uma superficie UVC real de 640x480 atras do Godot;
+- aceita quadros RGBA e NV21 e os envia ao Godot;
+- se o firmware nao entrega callback, copia os pixels da superficie UVC;
+- captura uma foto valida mesmo quando o usuario permanece parado;
+- tenta a camera em segundo plano sem bloquear o jogo para sempre;
+- salva as fotos em user://ranking_photos para ranking e apresentacoes.
+- salva miniaturas de ranking em 640x640 com JPEG de alta qualidade;
+- solicita cada permissao USB somente uma vez por execucao;
+- usa somente metodos existentes no AUSBC 3.2.7;
+- respeita a orientacao da TV Box, evitando janela pequena de compatibilidade.
+- remove todas as APIs que nao existem no AAR AUSBC 3.2.7;
+- trava o gerador contra a reintroducao dessas APIs;
+- reforca janela Android em MATCH_PARENT e barras do sistema ocultas.

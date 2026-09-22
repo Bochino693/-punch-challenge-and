@@ -1,0 +1,72 @@
+PUNCH CHALLENGE — SENSOR MH/LM393 + WEBCAM USB NO ANDROID
+=========================================================
+
+1. SENSOR CORRETO
+
+Grave no Arduino Nano SOMENTE este arquivo:
+
+  ARDUINO_SENSOR_DE_FEIXE_LM393\ARDUINO_SENSOR_DE_FEIXE_LM393.ino
+
+O arquivo arduino\punch_sensor\punch_sensor.ino e para MPU6050 e NAO serve
+para o sensor de feixe MH/LM393.
+
+Ligacao do sensor:
+
+  MH/LM393 VCC -> 5V do Nano
+  MH/LM393 GND -> GND do Nano
+  MH/LM393 DO  -> D4
+  MH/LM393 AO  -> A0
+
+Ajuste o trimpot do modulo ate o LED DO mudar de estado quando a palheta
+corta o feixe. Sem essa mudanca em DO, nenhum software consegue medir o
+soco. Ao ligar, a serial deve mostrar:
+
+  READY,PUNCH_OPTICAL,V3-MH-LM393
+  CALIBRATED,...
+  OK,OPTICAL
+
+2. BOTOES
+
+  START:  D2  -> botao normalmente aberto -> GND
+  CREDITO: D3 -> botao normalmente aberto -> GND
+  MENU:   D9  -> botao normalmente aberto -> GND
+
+O MENU substitui F9 na TV box. Nao aplique 5V nos botoes: o firmware usa
+INPUT_PULLUP e o pressionamento e o fechamento contra GND.
+
+3. CAMERA USB
+
+Esta versao nao depende mais de a TV box publicar a webcam no CameraServer
+do Godot. O plugin abre o fluxo UVC nativamente em 640x480 e entrega os
+quadros RGBA ao jogo. Use um HUB USB ALIMENTADO para webcam + Arduino.
+
+Na primeira abertura, aceite:
+
+  - permissao CAMERA do Android;
+  - janela USB da WEBCAM;
+  - janela USB do ARDUINO.
+
+4. GERAR O APK
+
+Abra PowerShell na pasta do projeto e execute apenas:
+
+  powershell -ExecutionPolicy Bypass -File .\GERAR_APK_COMPLETO.ps1
+
+O processo precisa de internet na primeira compilacao para baixar a
+biblioteca UVC. O APK correto sera criado em:
+
+  build\android\PunchChallenge.apk
+
+5. TESTE RAPIDO DO SENSOR
+
+Antes de montar o saco, abra o Monitor Serial em 115200, envie PING e
+confira READY,PUNCH_OPTICAL. Envie ARM, corte e libere o feixe uma vez. A
+resposta esperada e HIT,... . Feche o Monitor Serial antes de abrir o jogo,
+porque apenas um programa pode usar o Arduino por vez.
+
+Diagrama completo:
+
+  docs\LIGACAO_MH_LM393_ANDROID_MENU.png
+
+ATENCAO: motor e fitas usam fontes externas dimensionadas. Una apenas os
+GNDs de logica. Use fusivel e parada de emergencia na alimentacao do motor.

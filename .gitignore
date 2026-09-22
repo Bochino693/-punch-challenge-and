@@ -1,0 +1,31 @@
+.godot/
+*.tmp
+*.log
+build/
+dist/
+__pycache__/
+
+.telas/
+
+# O `~` NA FRENTE DO .DLL E COISA DO GODOT, NAO LIXO NOSSO.
+#
+# No Windows nao da para sobrescrever uma DLL que esta carregada. Quando
+# o editor precisa recarregar uma extensao, ele copia a atual para um
+# nome com `~` na frente e usa a copia -- entao `~gdserial.dll` NASCE
+# sozinho toda vez que o projeto e aberto, e fica travado enquanto o
+# editor estiver no ar.
+#
+# Ele chegou a ser versionado por descuido, e apagar do repositorio um
+# arquivo que o Windows nao deixa apagar poe o `git pull` num laco de
+# "Unlink failed. Should I try again? (y/n)" que nao termina nunca --
+# aconteceu, e custou uma sessao inteira do operador.
+#
+# Ignorado, ele continua nascendo na maquina de quem desenvolve e nunca
+# mais entra no repositorio nem atrapalha um pull.
+~*.dll
+~*.so
+~*.dylib
+*.exe
+*.pck
+*.zip
+final_project/

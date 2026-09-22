@@ -1,0 +1,30 @@
+CORREÇÃO DE ENQUADRAMENTO — PUNCH CHALLENGE BUILD 58
+=====================================================
+
+O que causava o corte
+---------------------
+O jogo usa uma tela lógica vertical de 1080 x 1920, mas a preservação da
+proporção não estava declarada no projeto. Além disso, televisões podem usar
+"overscan": ampliam o sinal recebido e escondem parte das quatro bordas.
+Por isso o rodapé era cortado e a imagem parecia estar com zoom.
+
+O que foi corrigido
+-------------------
+1. Proporção 9:16 sempre preservada (aspect = keep).
+2. Escala fracionária para qualquer resolução de monitor, TV ou projetor.
+3. O quadro ocupa toda a tela 9:16, sem borda interna ou redução.
+4. O quadro completo é centralizado sem deformar a arena, textos e botões.
+5. O Arduino conectado já libera a partida; encontrar/calibrar o sensor não
+   bloqueia mais o START e continua acontecendo em segundo plano.
+
+Como aplicar
+------------
+Copie project.godot, scripts/main.gd e a pasta tests para a raiz da Build 58,
+aceitando substituir os arquivos existentes. Depois abra o project.godot no
+Godot 4.6.1 e execute o projeto.
+
+Configuração recomendada da televisão
+--------------------------------------
+Quando disponível, use no menu da TV "Ajustar à tela", "Just Scan",
+"Screen Fit", "1:1" ou desative "Overscan". A correção já protege o jogo,
+mas essa opção também deixa o sinal do Windows fisicamente correto.

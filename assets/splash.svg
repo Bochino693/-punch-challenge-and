@@ -1,0 +1,37 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+  <!-- Abertura do Punch Challenge, no mesmo tema claro do jogo. -->
+  <defs>
+    <linearGradient id="ceu" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#dbe9fd"/><stop offset="1" stop-color="#fff1de"/>
+    </linearGradient>
+    <linearGradient id="luz" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#fff0cc" stop-opacity=".85"/><stop offset="1" stop-color="#fff0cc" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#ceu)"/>
+  <path d="M830 0h260l360 1080H470z" fill="url(#luz)"/>
+  <g transform="translate(960 470)">
+    <circle r="150" fill="none" stroke="#bccfea" stroke-width="6"/>
+    <circle r="220" fill="none" stroke="#bccfea" stroke-width="4"/>
+    <g stroke="#f2a007" stroke-width="16" stroke-linecap="round">
+      <path d="M96 -166l24 -46M-96 -166l-24 -46M166 -96l46 -24M-166 -96l-46 -24M166 96l46 24M-166 96l-46 24"/>
+    </g>
+    <circle cx="18" cy="-44" r="112" fill="#1c3566"/>
+    <circle cx="-98" cy="4" r="60" fill="#1c3566"/>
+    <rect x="-96" y="-64" width="200" height="106" rx="32" fill="#1c3566"/>
+    <rect x="-56" y="24" width="146" height="112" rx="32" fill="#1c3566"/>
+    <circle cx="18" cy="-44" r="97" fill="#e63950"/>
+    <circle cx="-98" cy="4" r="45" fill="#e63950"/>
+    <rect x="-81" y="-49" width="170" height="76" rx="26" fill="#e63950"/>
+    <rect x="-41" y="39" width="116" height="82" rx="26" fill="#e63950"/>
+    <g stroke="#ffffff" stroke-width="18" stroke-linecap="round">
+      <path d="M-40 -38h92"/><path d="M-32 66h62"/>
+    </g>
+  </g>
+  <text x="960" y="810" text-anchor="middle" font-family="Bungee, Impact, sans-serif"
+        font-size="118" fill="#16233d">PUNCH CHALLENGE</text>
+  <text x="960" y="878" text-anchor="middle" font-family="Bungee, Impact, sans-serif"
+        font-size="38" fill="#ef3b54">QUAL É A FORÇA DO SEU SOCO?</text>
+  <text x="960" y="960" text-anchor="middle" font-family="Bungee, Impact, sans-serif"
+        font-size="28" fill="#55688a">LAZER &amp; SPORT BRINQUEDOS</text>
+</svg>

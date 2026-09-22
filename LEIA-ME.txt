@@ -1,0 +1,17 @@
+ATUALIZACAO AUTOMATICA ANDROID
+
+1. Copie TODO o conteudo desta pasta para dentro da pasta
+   PunchChallenge-Android-TVBox existente.
+2. Confirme "Substituir os arquivos no destino".
+3. Abra PowerShell dentro de PunchChallenge-Android-TVBox.
+4. Execute somente:
+
+   powershell -ExecutionPolicy Bypass -File .\GERAR_APK_COMPLETO.ps1
+
+O script configura C:\AndroidSdk, encontra Godot 4.6.1, compila o plugin USB,
+exporta e verifica o APK. O resultado valido fica em:
+
+   build\android\PunchChallenge.apk
+
+Nao aceite apenas uma mensagem escrita na tela: o script somente mostra
+"APK GERADO E CONFERIDO" depois de confirmar arquivo e tamanho.

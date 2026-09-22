@@ -1,0 +1,23 @@
+PUNCH CHALLENGE ANDROID 1.0.60
+================================
+
+NAO COLE COMANDOS NO POWERSHELL.
+
+1. Clique com o botao direito no ZIP e escolha EXTRAIR TUDO.
+2. Abra a pasta extraida.
+3. Clique duas vezes em GERAR_APK_AGORA.bat.
+4. Espere aparecer SUCESSO.
+5. O APK estara em build\android\PunchChallenge.apk.
+6. Para instalar via ADB, clique duas vezes em INSTALAR_NA_TVBOX.bat.
+
+Na primeira abertura na TV Box, aceite:
+
+- permissao CAMERA;
+- permissao USB da webcam;
+- permissao USB do Arduino.
+
+O jogo abre em retrato, tela cheia imersiva. A webcam e aberta pelo driver
+UVC nativo e o Arduino pelo driver USB serial. Use HUB USB ALIMENTADO.
+
+Se ocorrer erro, fotografe a janela do GERAR_APK_AGORA.bat inteira. Nao copie
+as linhas PS C:\...>, os sinais >> nem o texto do erro de volta ao PowerShell.

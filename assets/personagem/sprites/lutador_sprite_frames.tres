@@ -1,0 +1,100 @@
+[gd_resource type="SpriteFrames" load_steps=11 format=3]
+
+; AS NOVE POSES SAO RECORTES DE UMA FOLHA UNICA, E ELAS SE TOCAM.
+;
+; Medindo o alfa da folha, sete das nove poses encostam em pelo menos
+; uma borda da propria celula: `nocaute` chega na coluna 409 (a ultima)
+; e `recuperacao`, a vizinha da direita, comeca na coluna 0. Com filtro
+; linear, a amostragem da borda pega meio texel do LADO DE FORA da
+; regiao -- ou seja, da pose vizinha -- e o resultado e um fiapo do
+; desenho ao lado grudado no contorno.
+;
+; `filter_clip` prende a amostragem dentro da regiao. Custa nada, nao
+; muda um pixel do interior e e o que mantem a sequencia limpa
+; enquanto as poses continuarem coladas umas nas outras.
+
+[ext_resource type="Texture2D" path="res://assets/personagem/sprites/lutador_folha_3x3.png" id="1_folha"]
+
+[sub_resource type="AtlasTexture" id="Atlas_guarda"]
+atlas = ExtResource("1_folha")
+region = Rect2(0, 0, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_idle"]
+atlas = ExtResource("1_folha")
+region = Rect2(410, 0, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_preparado"]
+atlas = ExtResource("1_folha")
+region = Rect2(820, 0, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_jab"]
+atlas = ExtResource("1_folha")
+region = Rect2(0, 426, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_direto"]
+atlas = ExtResource("1_folha")
+region = Rect2(410, 426, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_impacto_corpo"]
+atlas = ExtResource("1_folha")
+region = Rect2(820, 426, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_impacto_forte"]
+atlas = ExtResource("1_folha")
+region = Rect2(0, 852, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_nocaute"]
+atlas = ExtResource("1_folha")
+region = Rect2(410, 852, 410, 426)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="Atlas_recuperacao"]
+atlas = ExtResource("1_folha")
+region = Rect2(820, 852, 410, 426)
+filter_clip = true
+
+[resource]
+animations = [{"frames": [{"duration": 1.0, "texture": SubResource("Atlas_guarda")}],
+"loop": false,
+"name": &"guarda",
+"speed": 5.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_idle")}],
+"loop": false,
+"name": &"idle",
+"speed": 5.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_preparado")}],
+"loop": false,
+"name": &"preparado",
+"speed": 5.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_jab")}],
+"loop": false,
+"name": &"jab",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_direto")}],
+"loop": false,
+"name": &"direto",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_impacto_corpo")}],
+"loop": false,
+"name": &"impacto_corpo",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_impacto_forte")}],
+"loop": false,
+"name": &"impacto_forte",
+"speed": 8.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_nocaute")}],
+"loop": false,
+"name": &"nocaute",
+"speed": 5.0
+}, {"frames": [{"duration": 1.0, "texture": SubResource("Atlas_recuperacao")}],
+"loop": false,
+"name": &"recuperacao",
+"speed": 5.0
+}]
