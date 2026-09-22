@@ -1995,7 +1995,19 @@ func _registrar_impacto(
 	var receita := ImpactDirector.golpe(fx, alvo, pancada_nivel, CORES_FESTA)
 	tremor = float(receita["tremor"])
 	clarao = float(receita["clarao"])
-	hitstop_left = float(receita["hitstop"])
+	# O HIT-STOP ENCURTA NA TV BOX, e este é o segundo "travamento" que
+	# não era defeito nenhum: é um congelamento DE PROPÓSITO, o soluço
+	# que dá peso ao golpe. No SOCO PERFEITO ele vale 360 ms.
+	#
+	# Num monitor de PC a 60 quadros isso lê como impacto. Numa TV box a
+	# 30, somado ao quadro pesado do próprio golpe, lê como a máquina
+	# travando — que foi exatamente a queixa. O gesto continua existindo,
+	# com um terço do tempo: o bastante para o olho sentir a pancada, e
+	# pouco o bastante para ninguém achar que o jogo morreu.
+	var congela := float(receita["hitstop"])
+	if OS.has_feature("mobile"):
+		congela = minf(congela * 0.34, 0.12)
+	hitstop_left = congela
 	zoom_alvo = float(receita["zoom"])
 	zoom_impacto = float(receita["zoom"])
 	pancada_tempo = 0.0

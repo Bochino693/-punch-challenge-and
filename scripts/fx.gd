@@ -97,6 +97,53 @@ var _ondas: Array = []
 var _v := PackedVector2Array()
 var _c := PackedColorArray()
 var _idx := PackedInt32Array()
+## AS COORDENADAS DE TEXTURA DO LOTE.
+##
+## POR QUE O CONFETE PARECIA ENRUGADO. Cada partícula era um
+## quadrilátero de COR CHAPADA, sem textura: quatro quinas vivas e um
+## miolo de cor sólida. Num monitor de perto isso passa; numa TV de
+## cinquenta polegadas, onde cada pixel do jogo vira três ou quatro da
+## tela, o que se vê é um retalho de papel com serrilha — e é exatamente
+## a palavra que descreve o defeito.
+##
+## Com uma textura de borda macia e quatro UVs por partícula, o MESMO
+## quadrilátero passa a ter contorno que se dissolve. Não custa vértice
+## nenhum a mais, não custa chamada de desenho nenhuma a mais: custa um
+## `PackedVector2Array` do mesmo tamanho do de posições e uma amarração
+## de textura por lote. É a diferença entre confete recortado a tesoura
+## e confete de verdade.
+var _uv := PackedVector2Array()
+
+## A TEXTURA DE BORDA MACIA, calculada uma vez no arranque.
+##
+## Não vem de arquivo: são 32 × 32 pixels calculados aqui, o que evita
+## um PNG a mais no pacote e um `load` no meio da festa. O perfil é um
+## PLANALTO com rampa nas bordas — cheio no miolo, zero na borda —, e
+## não uma bola. A diferença importa porque o mesmo quadrilátero serve
+## para coisas muito diferentes: numa fita longa e estreita, um perfil
+## de bola apagaria o meio; o planalto deixa o corpo inteiro aceso e só
+## dissolve as quinas.
+static var _pincel: ImageTexture = null
+
+static func _pincel_macio() -> ImageTexture:
+	if _pincel != null:
+		return _pincel
+	const LADO := 32
+	const RAMPA := 0.22
+	var img := Image.create_empty(LADO, LADO, false, Image.FORMAT_RGBA8)
+	for y in range(LADO):
+		var v := (float(y) + 0.5) / float(LADO)
+		for x in range(LADO):
+			var u := (float(x) + 0.5) / float(LADO)
+			var fu := clampf((0.5 - absf(u - 0.5)) / RAMPA, 0.0, 1.0)
+			var fv := clampf((0.5 - absf(v - 0.5)) / RAMPA, 0.0, 1.0)
+			var a := fu * fv
+			# Suavização de Hermite: tira o vinco que uma rampa reta
+			# deixa no ponto em que ela encontra o planalto.
+			a = a * a * (3.0 - 2.0 * a)
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+	_pincel = ImageTexture.create_from_image(img)
+	return _pincel
 
 
 func limpar() -> void:
@@ -191,6 +238,7 @@ func _abrir_lote() -> void:
 	_v.clear()
 	_c.clear()
 	_idx.clear()
+	_uv.clear()
 
 
 ## Um quadrilátero, em dois triângulos, com a mesma cor nos quatro cantos.
@@ -200,6 +248,14 @@ func _quad(a: Vector2, b: Vector2, c: Vector2, d: Vector2, cor: Color) -> void:
 	_v.push_back(b)
 	_v.push_back(c)
 	_v.push_back(d)
+	# Os quatro cantos da textura, na MESMA ordem dos quatro vértices.
+	# Em `_risco`, U corre ao longo da fita e V atravessa a largura —
+	# então a mesma textura dissolve as pontas de uma faísca e as quinas
+	# de um quadradinho de poeira, sem código separado para cada um.
+	_uv.push_back(Vector2(0.0, 0.0))
+	_uv.push_back(Vector2(1.0, 0.0))
+	_uv.push_back(Vector2(1.0, 1.0))
+	_uv.push_back(Vector2(0.0, 1.0))
 	for _k in range(4):
 		_c.push_back(cor)
 	_idx.push_back(base)
@@ -224,7 +280,13 @@ func _risco(de: Vector2, ate: Vector2, largura: float, cor: Color) -> void:
 func _fechar_lote(item: RID) -> void:
 	if _idx.is_empty():
 		return
-	RenderingServer.canvas_item_add_triangle_array(item, _idx, _v, _c)
+	# A TEXTURA ENTRA AQUI, no mesmo comando. Continua sendo UM desenho
+	# por lote: o que muda é que agora ele tem contorno macio em vez de
+	# quina viva.
+	RenderingServer.canvas_item_add_triangle_array(
+		item, _idx, _v, _c, _uv, PackedInt32Array(), PackedFloat32Array(),
+		_pincel_macio().get_rid()
+	)
 
 
 func _cor_viva(i: int) -> Color:
@@ -307,6 +369,14 @@ func _desenhar_formas(item: RID, tela: CanvasItem) -> void:
 		_v.push_back(pos + Vector2(0, -tam).rotated(g))
 		_v.push_back(pos + Vector2(tam, tam * 0.6).rotated(g))
 		_v.push_back(pos + Vector2(-tam * 0.8, tam).rotated(g))
+		# O ESTILHAÇO É UM TRIÂNGULO, e não um quadrilátero — mas o lote
+		# é um só e todo vértice precisa da sua coordenada de textura,
+		# senão os arrays saem de tamanhos diferentes e o comando é
+		# recusado inteiro. Os três cantos pegam o miolo do pincel, que é
+		# opaco: o estilhaço continua sólido, como tem de ser.
+		_uv.push_back(Vector2(0.5, 0.5))
+		_uv.push_back(Vector2(0.5, 0.5))
+		_uv.push_back(Vector2(0.5, 0.5))
 		var cor := _cor_viva(i)
 		for _k in range(3):
 			_c.push_back(cor)

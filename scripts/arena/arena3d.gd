@@ -718,12 +718,27 @@ func avancar(delta: float) -> void:
 ## Em qual degrau a janela está: 0 magra, 1 cheia, 2 nítida.
 var _degrau := 1
 
+## O DEGRAU NÍTIDO NÃO EXISTE NO CELULAR NEM NA TV BOX.
+##
+## Ele foi feito para o gabinete de PC: desenhar a 1376 × 1540 e reduzir
+## para 688 × 770 dá quatro amostras por pixel e antisserrilha tudo de
+## graça. Num PC é barato; numa TV box Amlogic são QUATRO VEZES os
+## pixels de uma GPU que já estava no limite — e o vigia de desempenho
+## leva segundos para perceber e descer, segundos que caem justamente no
+## impacto, quando a festa, o tremor e a arena acontecem juntos.
+##
+## O resultado na TV box é o travamento no golpe. Aqui o degrau nítido
+## simplesmente não é oferecido: o teto é a janela cheia, e o vigia
+## continua livre para descer para a magra.
+static func _tem_degrau_nitido() -> bool:
+	return not OS.has_feature("mobile")
+
 func _ajustar_tamanho() -> void:
 	var alvo := _degrau
 	# Descer é urgente (a máquina já está sofrendo); subir é opcional.
 	if _degrau == 2 and qualidade < DESCE_DO_NITIDO:
 		alvo = 1
-	elif _degrau <= 1 and qualidade >= SOBE_PARA_NITIDO:
+	elif _degrau <= 1 and qualidade >= SOBE_PARA_NITIDO and _tem_degrau_nitido():
 		alvo = 2
 	if alvo == 1 and qualidade < DESCE_DO_CHEIO:
 		alvo = 0
