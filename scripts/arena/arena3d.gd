@@ -67,6 +67,15 @@ const TAMANHO_MAGRO := Vector2i(482, 539)
 ## quem decide em qual degrau a máquina fica.
 const TAMANHO_NITIDO := Vector2i(1376, 1540)
 
+## Quantas faíscas e quantos grãos de poeira existem na GPU. São
+## alocados uma vez, no arranque, e nunca mais: o soco mexe em
+## `amount_ratio` (ver `golpe`), que é só quantos deles nascem.
+const MAX_FAISCAS := 86
+const MAX_POEIRA := 34
+
+## Quantos quadros dura o ensaio geral do arranque. Ver `passo_do_ensaio`.
+const PASSOS_DO_ENSAIO := 8
+
 ## A ESCADA, COM HISTERESE. Subir e descer no mesmo número faria a
 ## janela piscar entre dois tamanhos toda vez que a qualidade
 ## encostasse no limiar — e trocar o tamanho de um `SubViewport`
@@ -488,7 +497,10 @@ func _montar_particulas_de_impacto() -> void:
 	processo.color = Color("fff0bd")
 	_impacto_particulas = GPUParticles3D.new()
 	_impacto_particulas.name = "ParticulasImpacto"
-	_impacto_particulas.amount = 72
+	# O NÚMERO DE PARTÍCULAS É FIXO A VIDA INTEIRA. Ver `golpe`: quem
+	# varia com a força do soco é `amount_ratio`, que não toca em
+	# memória nenhuma. Trocar `amount` realoca os buffers da GPU.
+	_impacto_particulas.amount = MAX_FAISCAS
 	_impacto_particulas.lifetime = 0.72
 	_impacto_particulas.one_shot = true
 	_impacto_particulas.explosiveness = 0.96
@@ -521,7 +533,7 @@ func _montar_particulas_de_impacto() -> void:
 	po_processo.scale_max = 1.65
 	_poeira_particulas = GPUParticles3D.new()
 	_poeira_particulas.name = "PoeiraDaLona"
-	_poeira_particulas.amount = 34
+	_poeira_particulas.amount = MAX_POEIRA
 	_poeira_particulas.lifetime = 1.35
 	_poeira_particulas.one_shot = true
 	_poeira_particulas.explosiveness = 0.88
@@ -653,6 +665,101 @@ func ligar(ativa: bool) -> void:
 func ativa() -> bool:
 	return _ativa
 
+# ------------------------------------------------------- o ensaio geral
+## O PRIMEIRO SOCO JÁ FOI DADO, ANTES DE ALGUÉM CHEGAR.
+##
+## POR QUE O PRIMEIRO GOLPE TRAVAVA, e por que só o primeiro.
+##
+## Nada aqui é lento. O que é lento é a PRIMEIRA VEZ de cada coisa. No
+## renderizador de compatibilidade — o que a TV box usa — o Godot não
+## compila o programa de um material quando o material é criado: compila
+## quando ele é DESENHADO pela primeira vez, dentro do quadro em que foi
+## desenhado. As duas nuvens de partículas nascem com `emitting = false`,
+## ou seja, nunca são desenhadas, e só passam a ser quando alguém bate.
+##
+## A conta do primeiro soco numa Amlogic era, toda ela, neste instante:
+## compilar o programa de processo das faíscas, compilar o de desenho,
+## subir a textura da faísca para a GPU, alocar os buffers, e ainda
+## acender pela primeira vez as três luzes com o clarão no máximo — que
+## é outra variante de programa, também inédita. Somado, isso é a fração
+## de segundo que o operador via como "o jogo travou no golpe".
+##
+## O ensaio faz tudo isso acontecer no arranque, com a janela da arena
+## fora da tela (durante a abertura ela não é mostrada em lugar nenhum,
+## ver `_arena_no_ar` em `main.gd`). Quando o primeiro soco de verdade
+## chegar, não haverá mais nada para compilar, subir ou alocar.
+func ensaiar() -> void:
+	if _ensaio != -1:
+		return
+	_ensaio = 0
+
+func ensaio_pendente() -> bool:
+	return _ensaio >= 0 and _ensaio < PASSOS_DO_ENSAIO
+
+## Um passo por quadro, chamado pela abertura. Custa um quadro de arena
+## cada — o mesmo que custaria em jogo, só que agora, quando ninguém
+## está esperando nada.
+func passo_do_ensaio(delta: float) -> void:
+	if not ensaio_pendente():
+		return
+	if _ativa:
+		# A rodada começou antes de o ensaio acabar. Ela manda: o ensaio
+		# encerra aqui, sem mexer em clarão, tremor nem pose, que agora
+		# pertencem ao jogo. O que já compilou continua compilado.
+		_ensaio = PASSOS_DO_ENSAIO
+		return
+	if _ensaio == 0:
+		# Poucas partículas: o que importa é DESENHAR uma, não fazer
+		# fumaça. Uma nuvem cheia aqui só gastaria o arranque.
+		if _impacto_particulas != null:
+			_impacto_particulas.amount_ratio = 0.06
+			_impacto_particulas.restart()
+			_impacto_particulas.emitting = true
+		if _poeira_particulas != null:
+			_poeira_particulas.amount_ratio = 0.06
+			_poeira_particulas.restart()
+			_poeira_particulas.emitting = true
+		# Clarão e torcida no máximo: é a variante de programa que o
+		# soco usa, e é a que precisa estar compilada antes dele.
+		_clarao = 1.0
+		_publico = 1.0
+		_tremor = 0.5
+	_relogio += delta
+	if lutador != null:
+		lutador.atualizar(delta)
+	_sombra_de_contato()
+	_camera()
+	_luzes()
+	_piscar()
+	_animar_torcida()
+	render_target_update_mode = SubViewport.UPDATE_ONCE
+	_ensaio += 1
+	if _ensaio >= PASSOS_DO_ENSAIO:
+		_encerrar_o_ensaio()
+
+func _encerrar_o_ensaio() -> void:
+	if _impacto_particulas != null:
+		_impacto_particulas.emitting = false
+		_impacto_particulas.amount_ratio = 1.0
+	if _poeira_particulas != null:
+		_poeira_particulas.emitting = false
+		_poeira_particulas.amount_ratio = 1.0
+	_clarao = 0.0
+	_publico = 0.0
+	_tremor = 0.0
+	_empurrao = 0.0
+	if lutador != null:
+		lutador.preparar()
+	_luzes()
+	# A janela volta a ficar desligada: a abertura não mostra a arena, e
+	# um quadro calculado que ninguém vê é o desperdício que `ligar`
+	# existe para evitar.
+	if not _ativa:
+		render_target_update_mode = SubViewport.UPDATE_DISABLED
+
+## Em que passo do ensaio estamos. -1 é "ainda não começou".
+var _ensaio := -1
+
 ## O SOCO CHEGOU NA ARENA. Devolve o que o corpo fez com ele.
 func golpe(forca: float, derruba := false, pontos := -1) -> Dictionary:
 	_tremor = clampf(0.35 + forca, 0.0, 1.35)
@@ -660,11 +767,23 @@ func golpe(forca: float, derruba := false, pontos := -1) -> Dictionary:
 	_empurrao = forca
 	_publico = maxf(_publico, clampf(0.08 + forca * (1.15 if derruba else 0.85), 0.0, 1.0))
 	if _impacto_particulas != null:
-		_impacto_particulas.amount = int(lerpf(18.0, 86.0, forca) * (1.0 if qualidade >= 0.55 else 0.55))
+		# `amount` REALOCAVA OS BUFFERS DA GPU A CADA SOCO.
+		#
+		# Esta linha trocava o número de partículas no instante do
+		# impacto. Em Godot, mexer em `amount` destrói o buffer de
+		# partículas e aloca outro — no meio do quadro do golpe, que já
+		# é o quadro mais cheio do jogo. Num PC isso some no ruído; numa
+		# TV box é um engasgo visível, e sempre no mesmo lugar: o soco.
+		#
+		# `amount_ratio` diz quantas das MESMAS partículas já alocadas
+		# nascem desta vez. Mesmo efeito na tela, alocação nenhuma.
+		_impacto_particulas.amount_ratio = clampf(
+			lerpf(0.21, 1.0, forca) * (1.0 if qualidade >= 0.55 else 0.55), 0.04, 1.0
+		)
 		_impacto_particulas.restart()
 		_impacto_particulas.emitting = true
 	if derruba and _poeira_particulas != null:
-		_poeira_particulas.amount = 34 if qualidade >= 0.55 else 18
+		_poeira_particulas.amount_ratio = 1.0 if qualidade >= 0.55 else 0.53
 		_poeira_particulas.restart()
 		_poeira_particulas.emitting = true
 	if lutador == null:

@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-	<uses-feature android:name="android.hardware.usb.host" android:required="true"/>
+	<!--
+	REQUIRED="FALSE" NÃO É DESCUIDO: É O QUE DEIXA O APLICATIVO EXISTIR.
+
+	Com `required="true"` o Android passa a tratar o USB Host como
+	condição do aplicativo. Numa TV box cujo firmware não declara
+	`android.hardware.usb.host` — e há muitas, inclusive com portas USB
+	que funcionam — o pacote instala e o atalho some da lista, ou abre e
+	fecha. É o retrato de "instala mas não abre".
+
+	O jogo não precisa dessa promessa: ele PERGUNTA pelo barramento em
+	tempo de execução e, quando não há, diz isso na tela e continua
+	jogável pelo sensor. Ver `GodotAndroidPlugin.listPorts`.
+	-->
+	<uses-feature android:name="android.hardware.usb.host" android:required="false"/>
 	<uses-feature android:name="android.hardware.camera.any" android:required="false"/>
 	<uses-feature android:name="android.hardware.camera.external" android:required="false"/>
 	<uses-permission android:name="android.permission.CAMERA"/>

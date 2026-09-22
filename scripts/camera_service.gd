@@ -79,7 +79,41 @@ var _android_bridge = null
 var _proxima_permissao_usb_ms := 0
 var _uvc_texture: ImageTexture = null
 var _proxima_leitura_uvc_ms := 0
+## Quando alguém pediu a imagem pela última vez. Ver `preview_texture`.
+var _interesse_ate_ms := 0
+## Quando a ponte nativa pode ser acordada. Ver `ESPERA_DA_PONTE_MS`.
+var _ponte_liberada_ms := 0
+var _ponte_acordada := false
 const INTERVALO_UVC_MS := 90
+
+## QUANDO NINGUÉM ESTÁ OLHANDO PARA A CÂMERA, ELA CUSTA QUASE NADA.
+##
+## Cada leitura de quadro UVC atravessa a JNI com 640 × 480 × 4 bytes —
+## 1,2 MB — e ainda sobe uma textura nova para a GPU. A 90 ms isso era
+## treze megabytes por segundo copiados na linha do jogo, DURANTE A
+## RODADA, para uma imagem que a rodada não mostra: a foto só é tirada
+## no obturador, e a pré-visualização só aparece nas Configurações.
+##
+## Agora o ritmo rápido vale só enquanto alguém está de fato olhando
+## (`preview_texture` marca isso) ou o obturador está aberto. Fora
+## disso sobra uma batida lenta, que existe só para o estado da tela de
+## Configurações não envelhecer.
+const INTERVALO_UVC_PARADO_MS := 1500
+## Por quanto tempo um pedido de pré-visualização mantém o ritmo rápido.
+const JANELA_DE_INTERESSE_MS := 900
+
+## O ARRANQUE NÃO FALA COM A PONTE NATIVA.
+##
+## O plugin Android abre a USB, registra o monitor do AUSBC e mexe na
+## janela da Activity. Qualquer uma dessas três coisas pode demorar, e
+## uma delas pode travar em firmwares de TV box. No arranque isso cai
+## antes do primeiro quadro — e um jogo que não desenha o primeiro
+## quadro é, para quem está olhando, um jogo que não abre.
+##
+## Nenhuma delas é urgente: a câmera serve para a foto do fim da
+## rodada. Então a ponte só é chamada depois de o jogo já estar
+## desenhando, e o atraso abaixo é o que garante isso.
+const ESPERA_DA_PONTE_MS := 2500
 
 ## A PRIVACIDADE JÁ FOI LIBERADA NESTA SESSÃO? Uma vez basta, e mais de
 ## uma seria mexer no registro a cada volta da busca.
@@ -103,8 +137,9 @@ var _obturador_teve_vida := false
 var _obturador_foi_aberto := false
 
 func _ready() -> void:
-	_preparar_android_usb()
-	_pedir_permissao_android()
+	# A PONTE NATIVA NÃO É CHAMADA AQUI. Ver `ESPERA_DA_PONTE_MS`: ela é
+	# acordada em `_process`, depois de o jogo já estar desenhando.
+	_ponte_liberada_ms = Time.get_ticks_msec() + ESPERA_DA_PONTE_MS
 	_acordar_servidor()
 	if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
 		CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
@@ -134,6 +169,21 @@ func _preparar_android_usb() -> void:
 	if _android_bridge != null and _android_bridge.has_method("prepareAndroidKiosk"):
 		_android_bridge.call("prepareAndroidKiosk")
 
+## Acorda a ponte Android uma única vez, e só depois do prazo. Devolve
+## `true` no quadro em que isso aconteceu, para o chamador saber que
+## gastou tempo e não gastar mais nada no mesmo quadro.
+func _acordar_a_ponte(agora: int) -> bool:
+	if _ponte_acordada or OS.get_name() != "Android":
+		return false
+	if agora < _ponte_liberada_ms:
+		return false
+	_ponte_acordada = true
+	_preparar_android_usb()
+	_pedir_permissao_android()
+	if enabled and _android_bridge != null:
+		_iniciar_uvc_android()
+	return true
+
 func _requisitar_webcam_usb_android(forcar := false) -> void:
 	if OS.get_name() != "Android" or _android_bridge == null:
 		return
@@ -147,9 +197,20 @@ func _requisitar_webcam_usb_android(forcar := false) -> void:
 			status = resposta
 
 func _process(_delta: float) -> void:
+	# A PONTE ACORDA ANTES DE QUALQUER CONDIÇÃO, e de propósito: ela
+	# também é quem põe o jogo em tela cheia (`prepareAndroidKiosk`).
+	# Se este despertar ficasse depois do `enabled` abaixo, desligar a
+	# câmera nas Configurações tiraria a tela cheia junto — que é o tipo
+	# de efeito colateral que ninguém liga a "desliguei a câmera".
+	#
+	# Um quadro só para isso. O que a ponte faz — abrir a USB, registrar
+	# o monitor, ajustar a janela — pode custar; custar aqui, na tela de
+	# abertura, não atrapalha ninguém.
+	var agora := Time.get_ticks_msec()
+	if _acordar_a_ponte(agora):
+		return
 	if not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
 		return
-	var agora := Time.get_ticks_msec()
 	# Em muitas TV boxes a webcam recebe permissão, mas nunca aparece no
 	# CameraServer. O plugin Android abre UVC nativamente e mantém somente o
 	# quadro mais recente; ler aqui não cria fila nem segura o impacto.
@@ -181,7 +242,10 @@ func iniciar_captura() -> void:
 	enabled = true
 	estado = Estado.SUBINDO
 	status = "PROCURANDO CÂMERA USB…"
-	_iniciar_uvc_android()
+	# No Android a ponte só é acionada depois do prazo de arranque; se
+	# ela já estiver de pé, a chamada abaixo vale normalmente.
+	if _ponte_acordada:
+		_iniciar_uvc_android()
 	_descobrir_cameras(false)
 
 func _iniciar_uvc_android() -> void:
@@ -196,7 +260,12 @@ func _amostrar_uvc_android(agora: int) -> bool:
 		return false
 	if agora < _proxima_leitura_uvc_ms:
 		return _uvc_texture != null and ao_vivo()
-	_proxima_leitura_uvc_ms = agora + INTERVALO_UVC_MS
+	# Ver `INTERVALO_UVC_PARADO_MS`: 1,2 MB por leitura só se paga
+	# enquanto alguém está olhando para a imagem ou tirando a foto.
+	var alguem_olhando := agora <= _interesse_ate_ms or agora <= _obturador_ate_ms
+	_proxima_leitura_uvc_ms = agora + (
+		INTERVALO_UVC_MS if alguem_olhando else INTERVALO_UVC_PARADO_MS
+	)
 	var dados_variant = _android_bridge.call("pollUvcFrame")
 	if not dados_variant is PackedByteArray:
 		return _uvc_texture != null and ao_vivo()
@@ -589,7 +658,15 @@ func pronta() -> bool:
 func estado_curto() -> String:
 	return status
 
+## QUEM PEDE A IMAGEM ESTÁ OLHANDO PARA ELA.
+##
+## Esta é a única coisa que liga o ritmo rápido de leitura da webcam
+## (ver `INTERVALO_UVC_PARADO_MS`). Nas Configurações e no exame da
+## câmera ela é chamada todo quadro, e a imagem chega a 11 por segundo
+## como antes. Em jogo ninguém a chama, e a webcam deixa de copiar
+## megabytes por cima da rodada.
 func preview_texture() -> Texture2D:
+	_interesse_ate_ms = Time.get_ticks_msec() + JANELA_DE_INTERESSE_MS
 	return _uvc_texture if _uvc_texture != null else _texture
 
 func available() -> bool:

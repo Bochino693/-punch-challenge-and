@@ -830,6 +830,14 @@ func _ready() -> void:
 		_salvar()
 		_show_notice("CONFIGURAÇÃO DE PONTUAÇÃO ATUALIZADA")
 	_montar_arena()
+	# O ENSAIO GERAL COMEÇA AGORA, por baixo da abertura.
+	#
+	# Ver `Arena3D.passo_do_ensaio`: os poucos quadros a seguir desenham
+	# a arena inteira uma vez, com faíscas, poeira e clarão, fora da
+	# tela. É o que tira a compilação de programa e a subida de textura
+	# de dentro do primeiro soco, que era onde o operador as sentia.
+	if arena != null:
+		arena.ensaiar()
 	_iniciar_serial()
 	_entrar_em_abertura()
 	# A música entra baixa por baixo da entrada e sobe na virada para a
@@ -1029,6 +1037,11 @@ func _process(delta: float) -> void:
 		arena.qualidade = desempenho.qualidade
 		arena.ligar(_arena_no_ar())
 		arena.avancar(passo)
+		# O ensaio só anda enquanto a arena ainda não entrou no ar. Se
+		# alguém apertar START antes de ele terminar, a rodada tem
+		# prioridade e o ensaio é abandonado no ponto em que estava —
+		# o que já compilou, já compilou.
+		arena.passo_do_ensaio(passo)
 	_socorro_da_camera(passo)
 	_laco_de_atracao(passo)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(passo * 7.0, 0.0, 1.0))
@@ -1995,19 +2008,19 @@ func _registrar_impacto(
 	var receita := ImpactDirector.golpe(fx, alvo, pancada_nivel, CORES_FESTA)
 	tremor = float(receita["tremor"])
 	clarao = float(receita["clarao"])
-	# O HIT-STOP ENCURTA NA TV BOX, e este é o segundo "travamento" que
-	# não era defeito nenhum: é um congelamento DE PROPÓSITO, o soluço
-	# que dá peso ao golpe. No SOCO PERFEITO ele vale 360 ms.
+	# ESTE HIT-STOP NÃO CONGELA NADA, E FAZ TEMPO.
 	#
-	# Num monitor de PC a 60 quadros isso lê como impacto. Numa TV box a
-	# 30, somado ao quadro pesado do próprio golpe, lê como a máquina
-	# travando — que foi exatamente a queixa. O gesto continua existindo,
-	# com um terço do tempo: o bastante para o olho sentir a pancada, e
-	# pouco o bastante para ninguém achar que o jogo morreu.
-	var congela := float(receita["hitstop"])
-	if OS.has_feature("mobile"):
-		congela = minf(congela * 0.34, 0.12)
-	hitstop_left = congela
+	# `hitstop_left` é escrito aqui, descontado uma vez por quadro em
+	# `_process`, e LIDO EM LUGAR NENHUM. O congelamento de propósito
+	# saiu do jogo quando o clarão e o tremor passaram a dar o peso do
+	# golpe sozinhos; o que ficou foi o número, sem efeito.
+	#
+	# Registro isto porque numa sessão anterior eu "encurtei o hit-stop
+	# na TV box" como conserto do travamento do primeiro soco. Aquilo
+	# não podia ter ajudado em nada: eu escalei um valor morto. O
+	# travamento é outro, está explicado em `Arena3D.passo_do_ensaio`, e
+	# o número aqui continua apenas para quem quiser voltar a usá-lo.
+	hitstop_left = float(receita["hitstop"])
 	zoom_alvo = float(receita["zoom"])
 	zoom_impacto = float(receita["zoom"])
 	pancada_tempo = 0.0
