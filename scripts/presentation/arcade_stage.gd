@@ -554,9 +554,10 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 	# sempre, que é a cena RESPIRANDO enquanto espera.
 	var batida := _janela(time, T_BRILHO + 0.15, 0.75)
 	if batida > 0.0 and batida < 1.0:
+		var raio_batida := lerpf(300.0, 640.0, ease(batida, 0.35))
 		canvas.draw_arc(
-			Vector2(540.0, 760.0), lerpf(300.0, 640.0, ease(batida, 0.35)),
-			0.0, TAU, 96, Color(GOLD, (1.0 - batida) * 0.5), 5.0, true
+			Vector2(540.0, 760.0), raio_batida,
+			0.0, TAU, Traco.segmentos(raio_batida), Color(GOLD, (1.0 - batida) * 0.5), 5.0, true
 		)
 	# Brasas subindo do rodapé: movimento lento e contínuo, que é o que
 	# uma cena parada precisa para continuar viva sem roubar a atenção

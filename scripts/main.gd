@@ -702,6 +702,12 @@ var ranking_announced := false
 var ranking_started_at := -1.0
 var intro_active := true
 var intro_time := 0.0
+## O CARREGADOR SEGURA A ENTRADA. Enquanto a tela de carregamento cobre o
+## jogo (shaders compilando, texturas subindo), a entrada fica parada no
+## primeiro quadro e o vigia de desempenho não mede nada: os quadros
+## lentos do arranque não são a máquina, são o arranque. Ver
+## `scripts/carregador.gd`.
+var entrada_segurada := false
 ## O QUANTO A ABERTURA JÁ CHEGOU, de 0 a 1.
 ##
 ## A entrada termina pousando o emblema e o letreiro exatamente onde a
@@ -1027,7 +1033,8 @@ func _process(delta: float) -> void:
 	# custa nada; com faxina, o jogo continua aceitando soco e START.
 	faxina.passo()
 	_colher_fotos_decodificadas()
-	desempenho.medir(delta)
+	if not entrada_segurada:
+		desempenho.medir(delta)
 	# O PASSO DO JOGO NÃO É MAIS O TEMPO CRU DO QUADRO.
 	#
 	# Havia aqui um teto e mais nada: `minf(delta, 0.1)`. Ele resolvia o
@@ -1146,7 +1153,14 @@ func _ritmo_da_camera() -> int:
 		return 700
 	return 2500
 
+func soltar_entrada() -> void:
+	entrada_segurada = false
+	intro_time = 0.0
+	ritmo = Ritmo.new()
+
 func _processar_abertura(delta: float) -> void:
+	if intro_active and entrada_segurada:
+		return
 	if intro_active:
 		var antes := intro_time
 		intro_time += delta
@@ -4273,8 +4287,8 @@ func _draw_clarao() -> void:
 	if clarao > 0.18 and state == GameDef.State.MEASURING:
 		var alvo := _alvo()
 		var raio := 100.0 + (1.0 - clarao) * 120.0
-		draw_arc(alvo + Vector2(-9.0, 0.0), raio, 0.0, TAU, 72, Color(Paleta.CIANO, clarao * 0.65), 7.0, true)
-		draw_arc(alvo + Vector2(9.0, 0.0), raio, 0.0, TAU, 72, Color(Paleta.VERMELHO, clarao * 0.60), 7.0, true)
+		draw_arc(alvo + Vector2(-9.0, 0.0), raio, 0.0, TAU, Traco.segmentos(raio), Color(Paleta.CIANO, clarao * 0.65), 7.0, true)
+		draw_arc(alvo + Vector2(9.0, 0.0), raio, 0.0, TAU, Traco.segmentos(raio), Color(Paleta.VERMELHO, clarao * 0.60), 7.0, true)
 
 # ---------------------------------------------------------------- abertura
 ## A ABERTURA NÃO É UMA TELA SÓ.
@@ -4330,7 +4344,7 @@ func _pagina_como_jogar(alpha: float) -> void:
 		var cor: Color = passos[i][2]
 		var centro := Vector2(MARGEM + 110.0, y + 60.0)
 		draw_circle(centro, 62.0, Paleta.tinta_clara(cor, 0.20), true, -1.0, true)
-		draw_arc(centro, 62.0, 0.0, TAU, 60, Color(cor, 0.55 * alpha), 4.0)
+		draw_arc(centro, 62.0, 0.0, TAU, Traco.segmentos(62.0), Color(cor, 0.55 * alpha), 4.0, true)
 		_icone(str(passos[i][0]), centro, 38.0, Color(Paleta.para_texto(cor), alpha))
 		_texto(
 			"%d." % (i + 1), centro.y - 4.0, 26, Color(cor, alpha),
@@ -5071,7 +5085,7 @@ func _ranking_cabecalho(entrou: bool, celebracao: Dictionary, tabela: float) -> 
 	draw_rect(faixa, Color(cor, 0.85 * a), false, 2.0)
 	draw_rect(Rect2(faixa.position, Vector2(7.0, faixa.size.y)), Color(cor, a))
 	_texto(
-		str(celebracao.get("subtitulo", "POSIÇÃO %d" % posicao_no_ranking)),
+		str(celebracao.get("subtitulo", "%dº LUGAR" % posicao_no_ranking)),
 		faixa.position.y + 38.0, 30, Color(cor, a),
 		HORIZONTAL_ALIGNMENT_CENTER, faixa.position.x, faixa.size.x
 	)
@@ -5185,15 +5199,18 @@ func _ranking_anuncio(t: float) -> void:
 	for anel in range(int(celebracao.get("aneis", 1))):
 		Traco.arco(self, centro, raio * (0.86 - float(anel) * 0.075), Color(Paleta.CREME, 0.40 - float(anel) * 0.09), 3.0)
 	if posicao_no_ranking == 1:
-		Icones.cinturao(self, centro + Vector2(0.0, -raio * 0.60), raio * 0.21, cor_selo)
+		Icones.cinturao(self, centro + Vector2(0.0, -raio * 0.57), raio * 0.23, cor_selo)
 	else:
-		Icones.trofeu(self, centro + Vector2(0.0, -raio * 0.60), raio * 0.15, cor_selo)
-	var largura := raio * 1.52
-	var x := centro.x - largura * 0.5
-	_texto_arcade(str(celebracao.get("titulo", "VOCÊ ENTROU")), centro.y - raio * 0.22, 58, Paleta.CREME, largura, x)
-	# Só o algarismo: o "º" da fonte de cartaz, grande, lia como "12".
-	_texto_arcade("%d" % posicao_no_ranking, centro.y + raio * 0.28, 132, Paleta.CREME, largura, x)
-	_texto_arcade(str(celebracao.get("subtitulo", "TOP 20")), centro.y + raio * 0.58, 36, cor_selo, largura * 0.92, centro.x - largura * 0.46)
+		Icones.trofeu(self, centro + Vector2(0.0, -raio * 0.57), raio * 0.16, cor_selo)
+	# Todos os textos usam uma caixa centrada no próprio selo. Antes a
+	# caixa começava em x=230 e terminava fora da tela; por isso palavras
+	# escapavam do círculo e a composição parecia desmontada.
+	var texto_largura := raio * 1.52
+	var texto_x := centro.x - texto_largura * 0.5
+	_texto_arcade(str(celebracao.get("titulo", "VOCÊ ENTROU")), centro.y - raio * 0.20, 62, Paleta.CREME, texto_largura, texto_x)
+	# O número ocupa o centro óptico e não a borda inferior.
+	_texto_arcade("%dº" % posicao_no_ranking, centro.y + raio * 0.25, 126, Paleta.CREME, texto_largura, texto_x)
+	_texto_arcade(str(celebracao.get("subtitulo", "NO TOP 20")), centro.y + raio * 0.56, 43, cor_selo, texto_largura, texto_x)
 
 # ---------------------------------------------------------------- central
 const CENTRAL_FUNDO := Color("2b0a13")

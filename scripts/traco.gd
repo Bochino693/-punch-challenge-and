@@ -97,24 +97,23 @@ static func contorno(ci: CanvasItem, pontos: PackedVector2Array, cor: Color, esp
 ## e as partículas.
 static var qualidade := 1.0
 
-## Abaixo desta folga o antisserrilhado dos arcos sai de cena.
-const SUAVIZA_ACIMA_DE := 0.75
-
-## Comprimento de corda buscado, em pixels.
-const CORDA := 20.0
+## CÍRCULO TEM DE SER CÍRCULO. Com corda de 20 px e borda crua na TV
+## Box, o anel de "carregando" (raio 26) saía com 6 a 12 lados e degraus:
+## na tela ele lia como um hexágono serrilhado. A conta agora mira uma
+## corda de 6 px (o olho não separa mais os lados) e a borda lisa fica
+## SEMPRE ligada: ela custa uma faixa fina de triângulos a mais, nada perto
+## do que custava o degrau na cara de quem joga.
+const CORDA := 6.0
 
 static func segmentos(raio: float) -> int:
 	var ideal := int(TAU * maxf(raio, 1.0) / CORDA)
-	return clampi(ideal, 12, 96)
+	return clampi(ideal, 32, 192)
 
 ## Um anel inteiro, com o custo proporcional ao tamanho dele.
 static func arco(
 	ci: CanvasItem, centro: Vector2, raio: float, cor: Color, espessura: float
 ) -> void:
-	ci.draw_arc(
-		centro, raio, 0.0, TAU, segmentos(raio), cor, espessura,
-		qualidade >= SUAVIZA_ACIMA_DE
-	)
+	ci.draw_arc(centro, raio, 0.0, TAU, segmentos(raio), cor, espessura, true)
 
 ## Um pedaço de anel. O número de segmentos acompanha o ÂNGULO, e não só
 ## o raio: meia volta com os segmentos de uma volta inteira é o dobro do
@@ -125,5 +124,5 @@ static func setor(
 	cor: Color, espessura: float
 ) -> void:
 	var fatia := absf(ate - de) / TAU
-	var passos := maxi(6, int(segmentos(raio) * fatia))
-	ci.draw_arc(centro, raio, de, ate, passos, cor, espessura, qualidade >= SUAVIZA_ACIMA_DE)
+	var passos := maxi(12, int(ceil(segmentos(raio) * fatia)))
+	ci.draw_arc(centro, raio, de, ate, passos, cor, espessura, true)
