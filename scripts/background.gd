@@ -63,6 +63,8 @@ func _ready() -> void:
 	# mesmo passo do jogo inteiro.
 	set_process(false)
 	_montar_camada_parada()
+	# As duas camadas de efeito ficam ACIMA do cenário (z relativo).
+	fx.montar(self, 1, 1)
 
 func _montar_camada_parada() -> void:
 	_parado = Control.new()
@@ -82,17 +84,17 @@ func _desenhar_parado() -> void:
 func avancar(passo: float) -> void:
 	tempo += passo
 	fx.atualizar(passo)
-	if randf() < passo * 2.5:
-		# Poeira brilhando dentro do cone de luz, subindo devagar.
-		fx.poeira(
-			Vector2(randf_range(0.25, 0.75) * size.x, size.y * HORIZONTE),
-			1, Color(1.0, 0.86, 0.55, 0.40), 60.0
-		)
 	# O cenário parado só é refeito quando a janela muda de tamanho — o
 	# que, num gabinete, acontece zero vez por noite.
 	if _parado != null and size != _tamanho_desenhado:
 		_tamanho_desenhado = size
 		_parado.queue_redraw()
+		# A poeira do palco é um emissor contínuo do motor, e não um
+		# sorteio por quadro em script.
+		fx.brisa(
+			"palco", Rect2(size.x * 0.25, size.y * HORIZONTE - 10.0, size.x * 0.5, 20.0),
+			Color(1.0, 0.86, 0.55, 0.40), 2.5
+		)
 	queue_redraw()
 
 func _draw() -> void:

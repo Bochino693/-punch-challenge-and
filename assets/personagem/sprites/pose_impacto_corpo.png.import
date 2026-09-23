@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c6ro2knpupkrt"
-path="res://.godot/imported/lutador_folha_3x3.png-4954b27568f98e77180d6995ae2719d7.ctex"
+uid="uid://dfciqtjnv42yx"
+path="res://.godot/imported/pose_impacto_corpo.png-60e8ed7f008a164d6852a95687c277bb.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/personagem/sprites/lutador_folha_3x3.png"
-dest_files=["res://.godot/imported/lutador_folha_3x3.png-4954b27568f98e77180d6995ae2719d7.ctex"]
+source_file="res://assets/personagem/sprites/pose_impacto_corpo.png"
+dest_files=["res://.godot/imported/pose_impacto_corpo.png-60e8ed7f008a164d6852a95687c277bb.ctex"]
 
 [params]
 
@@ -23,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=false
+mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""
@@ -37,4 +37,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

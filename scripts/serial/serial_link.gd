@@ -1,21 +1,21 @@
 class_name SerialLink
 extends RefCounted
 
-## Interface serial da edicao Android/TV Box. Esta variante nunca cria
-## processos externos: o Arduino e acessado pelo USB Host do Android.
+## Interface serial da edição Android/TV Box. O Arduino é acessado pelo
+## USB Host do Android (`AndroidUsbSerialLink`); fora do Android não há
+## caminho e a Central diz isso.
 
 signal line_received(line: String)
 signal opened(port: String)
 signal closed(port: String)
 
 const CAMINHO_ANDROID_USB := "android_usb"
-# Mantidos apenas para compatibilidade de leitura de configuracoes antigas.
 const CAMINHO_NENHUM := "nenhuma"
-const CAMINHO_NATIVO := "nativa_inativa_no_android"
-const CAMINHO_PONTE := "ponte_inativa_no_android"
 
-static func create_best(_evitar := "", _preferir := "") -> SerialLink:
-	if OS.get_name() == "Android":
+static func create_best() -> SerialLink:
+	# O singleton só existe no APK; aceitar ele fora do Android permite
+	# testar o motor de conexão com um plugin simulado na bancada.
+	if OS.get_name() == "Android" or Engine.has_singleton("PunchUsbSerial"):
 		var usb := AndroidUsbSerialLink.new()
 		if usb.available():
 			return usb

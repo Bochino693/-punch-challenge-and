@@ -79,7 +79,9 @@ var _android_bridge = null
 var _proxima_permissao_usb_ms := 0
 var _uvc_texture: ImageTexture = null
 var _proxima_leitura_uvc_ms := 0
-const INTERVALO_UVC_MS := 90
+## Cadência de leitura da webcam, em ms. O jogo muda conforme a tela:
+## rápida só quando a imagem aparece (ver `definir_ritmo`).
+var intervalo_uvc_ms := 90
 
 ## A PRIVACIDADE JÁ FOI LIBERADA NESTA SESSÃO? Uma vez basta, e mais de
 ## uma seria mexer no registro a cada volta da busca.
@@ -196,7 +198,7 @@ func _amostrar_uvc_android(agora: int) -> bool:
 		return false
 	if agora < _proxima_leitura_uvc_ms:
 		return _uvc_texture != null and ao_vivo()
-	_proxima_leitura_uvc_ms = agora + INTERVALO_UVC_MS
+	_proxima_leitura_uvc_ms = agora + intervalo_uvc_ms
 	var dados_variant = _android_bridge.call("pollUvcFrame")
 	if not dados_variant is PackedByteArray:
 		return _uvc_texture != null and ao_vivo()
@@ -220,6 +222,18 @@ func _amostrar_uvc_android(agora: int) -> bool:
 	estado = Estado.ACESA
 	status = "CÂMERA USB/UVC NATIVA — VÍDEO AO VIVO"
 	return true
+
+## Quantos ms entre quadros da webcam. Na contagem (prévia ao vivo) é
+## rápido; durante o soco e o ranking a imagem não aparece, então a
+## leitura quase para — e o plugin deixa de converter quadros que
+## ninguém vai ver, liberando CPU para o impacto.
+func definir_ritmo(ms: int) -> void:
+	if ms == intervalo_uvc_ms:
+		return
+	intervalo_uvc_ms = ms
+	_proxima_leitura_uvc_ms = mini(_proxima_leitura_uvc_ms, Time.get_ticks_msec() + ms)
+	if _android_bridge != null and _android_bridge.has_method("setUvcFrameInterval"):
+		_android_bridge.call("setUvcFrameInterval", ms)
 
 func _descobrir_cameras(recriar_extensao: bool) -> void:
 	_acordar_servidor()

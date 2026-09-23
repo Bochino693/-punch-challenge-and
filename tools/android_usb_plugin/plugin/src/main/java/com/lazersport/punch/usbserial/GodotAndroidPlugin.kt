@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     SerialInputOutputManager.Listener {
@@ -42,6 +43,15 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         private const val CAMERA_PERMISSION_REQUEST = 9041
         private const val WRITE_TIMEOUT_MS = 250
         private const val MAX_QUEUED_LINES = 512
+        private const val MAX_LINE_BYTES = 240
+        private const val MAX_PENDING_WRITES = 48
+        private const val PORT_LIST_CACHE_MS = 1000L
+        private const val UVC_CALLBACK_GRACE_MS = 1500L
+
+        // Estado da serial, lido pelo Godot a cada quadro (ver pollSerial).
+        private const val SERIAL_FECHADA = 0
+        private const val SERIAL_ABRINDO = 1
+        private const val SERIAL_ABERTA = 2
         private const val UVC_WIDTH = 640
         private const val UVC_HEIGHT = 480
         private const val UVC_MIN_FRAME_INTERVAL_MS = 90L
@@ -56,8 +66,19 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     }
     private val lock = Any()
     private val completeLines = ArrayDeque<String>()
-    private val partialLine = StringBuilder()
-    private val writer = Executors.newSingleThreadExecutor()
+    private val partialLine = ByteArray(MAX_LINE_BYTES)
+    private var partialLength = 0
+    private var partialOverflow = false
+    private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "punch-serial-tx").apply { isDaemon = true } }
+    // Abrir, fechar e listar a USB podem levar dezenas de milissegundos (e
+    // muito mais numa TV Box lenta). Tudo isso roda AQUI, nunca na thread
+    // do jogo: o Godot só lê o estado pronto.
+    private val serialWorker = Executors.newSingleThreadExecutor { r -> Thread(r, "punch-serial-io").apply { isDaemon = true } }
+    private val pendingWrites = AtomicInteger(0)
+    @Volatile private var serialState = SERIAL_FECHADA
+    @Volatile private var cachedPorts = ""
+    @Volatile private var cachedPortsAt = 0L
+    private val listingInFlight = AtomicBoolean(false)
     private val cameraWorker = Executors.newSingleThreadExecutor()
     private val serialPermissionRequested = mutableSetOf<Int>()
     private val cameraPermissionRequested = mutableSetOf<Int>()
@@ -78,12 +99,18 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     private var cameraPreviewView: AspectRatioTextureView? = null
     private val renderedFrameInFlight = AtomicBoolean(false)
     @Volatile private var lastRenderedFrameRequestAt = 0L
+    @Volatile private var lastCallbackAt = 0L
+    @Volatile private var uvcFrameIntervalMs = UVC_MIN_FRAME_INTERVAL_MS
 
     private val previewCallback = object : IPreviewDataCallBack {
         override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
             if (data == null) return
             val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastCameraFrameAt < UVC_MIN_FRAME_INTERVAL_MS) return
+            lastCallbackAt = now
+            // O jogo diz quantos quadros quer (ver setUvcFrameInterval):
+            // durante o soco ele pede poucos, e a conversão NV21 deixa de
+            // disputar CPU com o impacto.
+            if (now - lastCameraFrameAt < uvcFrameIntervalMs) return
             val size = activeCamera?.getPreviewSize()
             val width = size?.width ?: UVC_WIDTH
             val height = size?.height ?: UVC_HEIGHT
@@ -211,9 +238,9 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
             isClickable = false
             isFocusable = false
         }
-        val root = host.findViewById<ViewGroup>(android.R.id.content)
+        val root: ViewGroup? = host.findViewById(android.R.id.content)
         val params = FrameLayout.LayoutParams(UVC_WIDTH, UVC_HEIGHT)
-        root.addView(preview, 0, params)
+        root?.addView(preview, 0, params)
         cameraPreviewView = preview
         return preview
     }
@@ -369,7 +396,11 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
      * ARGB->RGBA ocorre numa thread exclusiva, sem bloquear o jogo. */
     private fun requestRenderedFrameFallback() {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastRenderedFrameRequestAt < UVC_RENDER_FALLBACK_INTERVAL_MS) return
+        // O caminho alternativo (copiar a TextureView na UI thread) só vale
+        // para firmwares em que o callback NÃO entrega quadros. Antes ele
+        // disparava em toda leitura vazia, mesmo com o callback vivo.
+        if (now - lastCallbackAt < UVC_CALLBACK_GRACE_MS) return
+        if (now - lastRenderedFrameRequestAt < maxOf(UVC_RENDER_FALLBACK_INTERVAL_MS, uvcFrameIntervalMs)) return
         if (!renderedFrameInFlight.compareAndSet(false, true)) return
         lastRenderedFrameRequestAt = now
         val host = activity
@@ -423,6 +454,12 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                 renderedFrameInFlight.set(false)
             }
         }
+    }
+
+    /** Intervalo mínimo entre quadros entregues ao jogo, em ms. */
+    @UsedByGodot
+    fun setUvcFrameInterval(intervalMs: Int) {
+        uvcFrameIntervalMs = intervalMs.coerceIn(33, 5000).toLong()
     }
 
     @UsedByGodot
@@ -487,54 +524,108 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         return "usb:%04X:%04X:%d".format(d.vendorId, d.productId, d.deviceId)
     }
 
+    /** Lista em cache; a enumeração USB roda no worker, nunca no jogo. */
     @UsedByGodot
-    fun listPorts(): String = try {
-        drivers().joinToString("\n") { key(it) }.also { lastError = "" }
-    } catch (t: Throwable) {
-        lastError = "falha ao listar USB: ${t.message ?: t.javaClass.simpleName}"
-        ""
+    fun listPorts(): String {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - cachedPortsAt >= PORT_LIST_CACHE_MS && listingInFlight.compareAndSet(false, true)) {
+            serialWorker.execute {
+                try {
+                    cachedPorts = drivers().joinToString("\n") { key(it) }
+                } catch (t: Throwable) {
+                    lastError = "falha ao listar USB: ${t.message ?: t.javaClass.simpleName}"
+                } finally {
+                    cachedPortsAt = android.os.SystemClock.elapsedRealtime()
+                    listingInFlight.set(false)
+                }
+            }
+        }
+        return cachedPorts
     }
 
+    /**
+     * Pede a abertura e volta NA HORA. O resultado aparece em pollSerial():
+     * estado ABERTA, ou FECHADA com getLastError() dizendo o motivo.
+     */
     @UsedByGodot
     fun openPort(portKey: String, baud: Int): Boolean {
+        if (serialState == SERIAL_ABRINDO) return true
         closePort()
-        return try {
+        serialState = SERIAL_ABRINDO
+        serialWorker.execute { openNow(portKey, baud) }
+        return true
+    }
+
+    private fun openNow(portKey: String, baud: Int) {
+        try {
             val driver = drivers().firstOrNull { key(it) == portKey }
-                ?: return fail("dispositivo USB nao esta mais conectado")
+            if (driver == null) {
+                openFailed("dispositivo USB nao esta mais conectado")
+                return
+            }
             if (!usbManager.hasPermission(driver.device)) {
                 val host = activity
-                    ?: return fail("tela Android ainda nao esta disponivel")
+                if (host == null) {
+                    openFailed("tela Android ainda nao esta disponivel")
+                    return
+                }
                 val pedir = synchronized(lock) { serialPermissionRequested.add(driver.device.deviceId) }
                 if (pedir) {
                     val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
                     val intent = Intent(ACTION_USB_PERMISSION).setPackage(host.packageName)
-                    usbManager.requestPermission(
-                        driver.device,
-                        PendingIntent.getBroadcast(host, driver.device.deviceId, intent, flags)
-                    )
-                    return fail("autorize o Arduino uma vez e aguarde a reconexao")
+                    host.runOnUiThread {
+                        usbManager.requestPermission(
+                            driver.device,
+                            PendingIntent.getBroadcast(host, driver.device.deviceId, intent, flags)
+                        )
+                    }
+                    openFailed("autorize o Arduino uma vez e aguarde a reconexao")
+                } else {
+                    openFailed("aguardando autorizacao USB do Arduino")
                 }
-                return fail("aguardando autorizacao USB do Arduino")
+                return
             }
             synchronized(lock) { serialPermissionRequested.remove(driver.device.deviceId) }
             val connection = usbManager.openDevice(driver.device)
-                ?: return fail("Android recusou a abertura do dispositivo USB")
+            if (connection == null) {
+                openFailed("Android recusou a abertura do dispositivo USB")
+                return
+            }
             val port = driver.ports.firstOrNull()
-                ?: return fail("adaptador USB serial nao possui porta")
+            if (port == null) {
+                connection.close()
+                openFailed("adaptador USB serial nao possui porta")
+                return
+            }
             port.open(connection)
             port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             try { port.dtr = true } catch (_: Throwable) { }
             try { port.rts = true } catch (_: Throwable) { }
+            synchronized(lock) {
+                completeLines.clear()
+                partialLength = 0
+                partialOverflow = false
+            }
             val manager = SerialInputOutputManager(port, this)
             serialPort = port
             ioManager = manager
             manager.start()
             lastError = ""
-            true
+            // Outra chamada pode ter pedido o fechamento enquanto abria.
+            if (serialState == SERIAL_ABRINDO) {
+                serialState = SERIAL_ABERTA
+            } else {
+                closeNow()
+            }
         } catch (t: Throwable) {
-            closePort()
-            fail("falha ao abrir USB serial: ${t.message ?: t.javaClass.simpleName}")
+            closeNow()
+            openFailed("falha ao abrir USB serial: ${t.message ?: t.javaClass.simpleName}")
         }
+    }
+
+    private fun openFailed(message: String) {
+        lastError = message
+        serialState = SERIAL_FECHADA
     }
 
     private fun fail(message: String): Boolean {
@@ -542,31 +633,69 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         return false
     }
 
+    /** Marca fechada na hora; liberar a USB acontece no worker. */
     @UsedByGodot
     fun closePort() {
+        serialState = SERIAL_FECHADA
+        synchronized(lock) {
+            completeLines.clear()
+            partialLength = 0
+            partialOverflow = false
+        }
+        serialWorker.execute { closeNow() }
+    }
+
+    private fun closeNow() {
         val manager = ioManager
         val port = serialPort
         ioManager = null
         serialPort = null
         try { manager?.stop() } catch (_: Throwable) { }
         try { port?.close() } catch (_: Throwable) { }
-        synchronized(lock) {
-            completeLines.clear()
-            partialLine.setLength(0)
-        }
     }
 
     @UsedByGodot
-    fun isOpen(): Boolean = serialPort != null
+    fun isOpen(): Boolean = serialState == SERIAL_ABERTA
 
     @UsedByGodot
+    fun getSerialState(): Int = serialState
+
+    /**
+     * Uma chamada por quadro: a primeira linha é o estado (0 fechada,
+     * 1 abrindo, 2 aberta) e as seguintes são as linhas recebidas desde a
+     * última chamada. Uma travessia JNI em vez de três.
+     */
+    @UsedByGodot
+    fun pollSerial(): String = synchronized(lock) {
+        if (completeLines.isEmpty()) return@synchronized serialState.toString()
+        buildString {
+            append(serialState)
+            while (completeLines.isNotEmpty()) {
+                append('\n')
+                append(completeLines.removeFirst())
+            }
+        }
+    }
+
+    /**
+     * A escrita entra numa fila própria e não segura o jogo. Se a placa
+     * parar de ler, a fila não cresce sem fim: acima do limite a linha é
+     * descartada (os comandos do jogo são todos repetíveis).
+     */
+    @UsedByGodot
     fun writeLine(line: String): Boolean {
-        val port = serialPort ?: return fail("USB serial fechada")
+        val port = serialPort
+        if (port == null || serialState != SERIAL_ABERTA) return fail("USB serial fechada")
+        if (pendingWrites.get() >= MAX_PENDING_WRITES) return fail("fila de escrita cheia")
+        pendingWrites.incrementAndGet()
+        val bytes = (line.trimEnd() + "\n").toByteArray(StandardCharsets.US_ASCII)
         writer.execute {
             try {
-                port.write((line.trimEnd() + "\n").toByteArray(StandardCharsets.UTF_8), WRITE_TIMEOUT_MS)
+                if (serialPort === port) port.write(bytes, WRITE_TIMEOUT_MS)
             } catch (t: Throwable) {
                 lastError = "falha ao escrever na USB: ${t.message ?: t.javaClass.simpleName}"
+            } finally {
+                pendingWrites.decrementAndGet()
             }
         }
         return true
@@ -586,19 +715,33 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     @UsedByGodot
     fun getLastError(): String = lastError
 
+    /**
+     * Montagem de linha BYTE A BYTE, em ASCII. O protocolo do Arduino é
+     * texto simples; decodificar pedaços como UTF-8 quebrava caracteres
+     * divididos entre dois pacotes USB. Ruído (byte de controle, linha
+     * gigante sem fim) é descartado em vez de acumular.
+     */
     override fun onNewData(data: ByteArray) {
-        val text = String(data, StandardCharsets.UTF_8)
         synchronized(lock) {
-            for (character in text) {
-                if (character == '\n') {
-                    val line = partialLine.toString().trimEnd('\r')
-                    partialLine.setLength(0)
-                    if (line.isNotEmpty()) {
-                        if (completeLines.size >= MAX_QUEUED_LINES) completeLines.removeFirst()
-                        completeLines.addLast(line)
+            for (b in data) {
+                val c = b.toInt() and 0xff
+                when {
+                    c == 0x0A -> {
+                        if (!partialOverflow && partialLength > 0) {
+                            var end = partialLength
+                            while (end > 0 && partialLine[end - 1].toInt() == 0x0D) end--
+                            if (end > 0) {
+                                if (completeLines.size >= MAX_QUEUED_LINES) completeLines.removeFirst()
+                                completeLines.addLast(String(partialLine, 0, end, StandardCharsets.US_ASCII))
+                            }
+                        }
+                        partialLength = 0
+                        partialOverflow = false
                     }
-                } else {
-                    partialLine.append(character)
+                    c == 0x0D -> if (partialLength < MAX_LINE_BYTES) partialLine[partialLength++] = b
+                    c < 0x20 || c > 0x7E -> Unit
+                    partialLength < MAX_LINE_BYTES -> partialLine[partialLength++] = b
+                    else -> partialOverflow = true
                 }
             }
         }
