@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Aparelhos USB que o Punch Challenge assume sozinho: Arduino e seus
+  conversores seriais (CH340, FTDI, CP210x, PL2303) e a webcam UVC.
+  Com isto o Android mostra, no primeiro encaixe, "Abrir Punch Challenge
+  quando este aparelho for conectado" com a caixa "Usar por padrão".
+  Marcada uma vez, a permissão fica guardada e não é pedida de novo.
+-->
+<resources>
+    <usb-device vendor-id="9025" />        <!-- 0x2341 Arduino -->
+    <usb-device vendor-id="10755" />       <!-- 0x2A03 Arduino.org -->
+    <usb-device vendor-id="6790" />        <!-- 0x1A86 CH340/CH341 -->
+    <usb-device vendor-id="1027" />        <!-- 0x0403 FTDI -->
+    <usb-device vendor-id="4292" />        <!-- 0x10C4 Silicon Labs CP210x -->
+    <usb-device vendor-id="1659" />        <!-- 0x067B Prolific PL2303 -->
+    <usb-device class="239" subclass="2" /> <!-- webcam UVC (composta) -->
+    <usb-device class="14" />               <!-- webcam UVC (classe vídeo) -->
+</resources>

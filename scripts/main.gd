@@ -6516,11 +6516,13 @@ func _draw_alertas_graves() -> void:
 		return
 	var altura := 34.0 * float(recados.size()) + 16.0
 	var caixa := Rect2(40.0, 1920.0 - altura - 8.0, 1000.0, altura)
-	draw_rect(caixa, Color(Paleta.VERMELHO, 0.92))
+	# Placa escura com letra âmbar: vermelho em cima do rodapé vermelho
+	# some — o aviso tem de saltar do fundo, não se misturar a ele.
+	draw_rect(caixa, Color("12040a", 0.94))
 	draw_rect(caixa, Paleta.AMBAR, false, 2.0)
 	for i in range(recados.size()):
 		_texto(
-			recados[i], caixa.position.y + 26.0 + float(i) * 34.0, 17, Color.WHITE,
+			recados[i], caixa.position.y + 26.0 + float(i) * 34.0, 17, Paleta.AMBAR,
 			HORIZONTAL_ALIGNMENT_CENTER, caixa.position.x, caixa.size.x
 		)
 
