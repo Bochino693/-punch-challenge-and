@@ -15,11 +15,11 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Punch Challenge"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/carregador.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 boot_splash/bg_color=Color(0.098, 0.0235, 0.051, 1)
-boot_splash/stretch_mode=0
-boot_splash/image="res://assets/branding/selo_lazer.png"
+boot_splash/stretch_mode=1
+boot_splash/image="res://assets/branding/abertura_tvbox.png"
 config/icon="res://assets/icon.png"
 
 [display]
@@ -63,4 +63,5 @@ debug_simulation=false
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
+textures/canvas_textures/default_texture_filter=3
 environment/defaults/default_clear_color=Color(0.098, 0.0235, 0.051, 1)

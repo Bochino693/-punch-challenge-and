@@ -53,7 +53,9 @@ const CAUDA := 14
 ## dando conta ele fica, porque não custa nada que falte; na que não
 ## está, ele é a primeira coisa a sair.
 func _liso() -> bool:
-	return qualidade > 0.7
+	# Bulbo redondo, e não quadradinho: a borda lisa só sai quando a
+	# máquina está realmente afogada.
+	return qualidade > 0.45
 
 ## ======================================================================
 ## A FIEIRA APAGADA É DESENHADA UMA VEZ, E NÃO SESSENTA POR SEGUNDO.

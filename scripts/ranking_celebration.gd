@@ -8,7 +8,7 @@ extends RefCounted
 static func para(posicao: int) -> Dictionary:
 	if posicao == 1:
 		return {
-			"id": "campeao", "titulo": "NOVO CAMPEÃO", "subtitulo": "PRIMEIRO LUGAR DA ARENA",
+			"id": "campeao", "titulo": "NOVO CAMPEÃO", "subtitulo": "1º LUGAR DA ARENA",
 			"som": "torcida_recorde", "volume": 1.0, "confetes": 680,
 			"confete_lote": 22, "confete_intervalo": 0.11, "confete_duracao": 3.4,
 			"canhoes": 3, "forca": 880.0, "tremor": 22.0, "raios": 28,
@@ -17,7 +17,7 @@ static func para(posicao: int) -> Dictionary:
 		}
 	if posicao <= 3:
 		return {
-			"id": "podio", "titulo": "VOCÊ ESTÁ NO PÓDIO", "subtitulo": ["", "", "SEGUNDO LUGAR", "TERCEIRO LUGAR"][posicao],
+			"id": "podio", "titulo": "VOCÊ ESTÁ NO PÓDIO", "subtitulo": "%dº LUGAR" % posicao,
 			"som": "torcida_podio", "volume": -1.0, "confetes": 390,
 			"confete_lote": 17, "confete_intervalo": 0.15, "confete_duracao": 2.9,
 			"canhoes": 2, "forca": 760.0, "tremor": 15.0, "raios": 20,
@@ -26,7 +26,7 @@ static func para(posicao: int) -> Dictionary:
 		}
 	if posicao <= 10:
 		return {
-			"id": "top10", "titulo": "ENTROU NO TOP 10", "subtitulo": "POSIÇÃO %d" % posicao,
+			"id": "top10", "titulo": "ENTROU NO TOP 10", "subtitulo": "%dº LUGAR" % posicao,
 			"som": "torcida_top10", "volume": -3.0, "confetes": 210,
 			"confete_lote": 12, "confete_intervalo": 0.21, "confete_duracao": 2.4,
 			"canhoes": 1, "forca": 660.0, "tremor": 10.0, "raios": 14,
@@ -35,7 +35,7 @@ static func para(posicao: int) -> Dictionary:
 		}
 	if posicao <= 20:
 		return {
-			"id": "top20", "titulo": "VOCÊ ENTROU", "subtitulo": "POSIÇÃO %d DO TOP 20" % posicao,
+			"id": "top20", "titulo": "VOCÊ ENTROU", "subtitulo": "%dº LUGAR NO TOP 20" % posicao,
 			"som": "torcida_top20", "volume": -5.0, "confetes": 95,
 			"confete_lote": 8, "confete_intervalo": 0.30, "confete_duracao": 1.8,
 			"canhoes": 0, "forca": 560.0, "tremor": 6.0, "raios": 9,
