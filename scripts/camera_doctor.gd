@@ -32,11 +32,14 @@ func diagnosticar(resolver: bool, _caminho_antigo := "", _caminho_inspetor := ""
 			linhas.append("PLUGIN USB NÃO ESTÁ NO APK — GERE COM GERAR_APK_AGORA.bat")
 		else:
 			var ponte = Engine.get_singleton("PunchUsbSerial")
-			if ponte != null and ponte.has_method("getCameraReport"):
-				for linha in str(ponte.call("getCameraReport")).split("\n", false):
-					linhas.append(linha)
+			# Chamada direta: `has_method` num plugin Android responde "não"
+			# para tudo (ver `CameraService.METODOS_DA_PONTE`).
+			var relatorio = ponte.call("getCameraReport") if ponte != null else null
+			if relatorio == null or str(relatorio).is_empty():
+				linhas.append("PLUGIN USB SEM RELATÓRIO — GERE DE NOVO COM GERAR_APK_AGORA.bat")
 			else:
-				linhas.append("PLUGIN USB ANTIGO NO APK — GERE DE NOVO COM GERAR_APK_AGORA.bat")
+				for linha in str(relatorio).split("\n", false):
+					linhas.append(linha)
 		var feeds := CameraServer.feeds()
 		for i in range(feeds.size()):
 			indices.append(i)

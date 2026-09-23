@@ -29,7 +29,9 @@ func _init() -> void:
 	if Engine.has_singleton("PunchUsbSerial"):
 		_plugin = Engine.get_singleton("PunchUsbSerial")
 		_motivo = ""
-		_assincrono = _plugin.has_method("pollSerial")
+		# O plugin deste APK não tem `pollSerial`, e `has_method` num plugin
+		# Android não serve para descobrir isso (responde "não" sempre).
+		_assincrono = false
 
 func nome_do_caminho() -> String:
 	return CAMINHO_ANDROID_USB

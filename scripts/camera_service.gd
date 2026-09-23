@@ -119,6 +119,24 @@ func _ready() -> void:
 		status = "CÂMERA DESATIVADA"
 	set_process(true)
 
+## O QUE A PONTE ANDROID SABE FAZER.
+##
+## NÃO SE PERGUNTA `has_method` AO PLUGIN. O objeto que o Godot entrega
+## para um plugin Android (`JNISingleton`) só atende a chamada direta: o
+## `has_method` dele é o do `Object` comum e responde "não" para TODA
+## função do plugin. Era por isso que a câmera nunca abria — cada chamada
+## da câmera estava atrás de um `has_method` e nenhuma chegava a sair.
+## A lista abaixo é a das funções `@UsedByGodot` do plugin deste APK.
+const METODOS_DA_PONTE := [
+	"prepareAndroidKiosk", "requestUsbCameraAccess", "startUvcCamera",
+	"stopUvcCamera", "pollUvcFrame", "getUvcFrameWidth", "getUvcFrameHeight",
+	"getUvcStatus", "getUvcDiagnostics", "getUsbCameraStatus",
+	"getSystemCameraCount", "getCameraReport",
+]
+
+func _ponte_tem(metodo: String) -> bool:
+	return _android_bridge != null and metodo in METODOS_DA_PONTE
+
 func _pedir_permissao_android() -> void:
 	if OS.get_name() != "Android":
 		return
@@ -133,7 +151,7 @@ func _preparar_android_usb() -> void:
 	if OS.get_name() != "Android" or not Engine.has_singleton("PunchUsbSerial"):
 		return
 	_android_bridge = Engine.get_singleton("PunchUsbSerial")
-	if _android_bridge != null and _android_bridge.has_method("prepareAndroidKiosk"):
+	if _android_bridge != null and _ponte_tem("prepareAndroidKiosk"):
 		_android_bridge.call("prepareAndroidKiosk")
 
 ## QUEM ABRE A CÂMERA NO ANDROID — um só, nunca os dois.
@@ -143,7 +161,7 @@ func _preparar_android_usb() -> void:
 ## não lista. Quando a ponte vê câmera, o CameraServer fica de fora; quando
 ## só o CameraServer vê (HAL novo com câmera externa), a ponte fica de fora.
 func _ponte_tem_camera() -> bool:
-	return _android_bridge != null and _android_bridge.has_method("getSystemCameraCount") \
+	return _android_bridge != null and _ponte_tem("getSystemCameraCount") \
 		and int(_android_bridge.call("getSystemCameraCount")) > 0
 
 func _servidor_tem_camera() -> bool:
@@ -158,7 +176,7 @@ func _requisitar_webcam_usb_android(forcar := false) -> void:
 	if not forcar and agora < _proxima_permissao_usb_ms:
 		return
 	_proxima_permissao_usb_ms = agora + 5000
-	if _android_bridge.has_method("requestUsbCameraAccess"):
+	if _ponte_tem("requestUsbCameraAccess"):
 		var resposta := str(_android_bridge.call("requestUsbCameraAccess"))
 		if CameraServer.feeds().is_empty() and not resposta.is_empty():
 			status = resposta
@@ -206,12 +224,12 @@ func _iniciar_uvc_android() -> void:
 		return
 	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
 		return
-	if _android_bridge.has_method("startUvcCamera"):
+	if _ponte_tem("startUvcCamera"):
 		_android_bridge.call("startUvcCamera")
 
 func _amostrar_uvc_android(agora: int) -> bool:
 	if OS.get_name() != "Android" or _android_bridge == null \
-			or not _android_bridge.has_method("pollUvcFrame"):
+			or not _ponte_tem("pollUvcFrame"):
 		return false
 	if agora < _proxima_leitura_uvc_ms:
 		return _uvc_texture != null and ao_vivo()
@@ -221,7 +239,7 @@ func _amostrar_uvc_android(agora: int) -> bool:
 		return _uvc_texture != null and ao_vivo()
 	var dados: PackedByteArray = dados_variant
 	if dados.is_empty():
-		if _android_bridge.has_method("getUvcStatus") and _feed == null:
+		if _ponte_tem("getUvcStatus") and _feed == null:
 			status = str(_android_bridge.call("getUvcStatus"))
 		return _uvc_texture != null and ao_vivo()
 	var largura := int(_android_bridge.call("getUvcFrameWidth"))
@@ -249,7 +267,7 @@ func definir_ritmo(ms: int) -> void:
 		return
 	intervalo_uvc_ms = ms
 	_proxima_leitura_uvc_ms = mini(_proxima_leitura_uvc_ms, Time.get_ticks_msec() + ms)
-	if _android_bridge != null and _android_bridge.has_method("setUvcFrameInterval"):
+	if _android_bridge != null and _ponte_tem("setUvcFrameInterval"):
 		_android_bridge.call("setUvcFrameInterval", ms)
 
 func _descobrir_cameras(recriar_extensao: bool) -> void:
@@ -322,7 +340,7 @@ func _dll_da_camera_esta_no_disco() -> bool:
 ## Agora as três causas são separadas, e cada uma diz o que fazer.
 func _diagnostico_da_plataforma() -> String:
 	if OS.get_name() == "Android" and _android_bridge != null \
-			and _android_bridge.has_method("getUsbCameraStatus"):
+			and _ponte_tem("getUsbCameraStatus"):
 		return str(_android_bridge.call("getUsbCameraStatus"))
 	if OS.get_name() != "Windows":
 		return ""
@@ -780,7 +798,7 @@ func _parar_feed() -> void:
 	_last_frame_ms = 0
 
 func _parar_uvc_android() -> void:
-	if _android_bridge != null and _android_bridge.has_method("stopUvcCamera"):
+	if _android_bridge != null and _ponte_tem("stopUvcCamera"):
 		_android_bridge.call("stopUvcCamera")
 	_uvc_texture = null
 	_proxima_leitura_uvc_ms = 0

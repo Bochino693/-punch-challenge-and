@@ -6736,6 +6736,11 @@ func _draw_alertas_graves() -> void:
 		recados.append(Versao.recado_do_estrago())
 	if link != null and not link.available():
 		recados.append("SEM CAMINHO ATÉ O ARDUINO — START, CRÉDITO E SENSOR MORTOS")
+	# SEM CÂMERA O JOGO SEGUE — e diz isso. Depois da espera inicial, a
+	# rodada começa sem foto; o aviso explica por que o ranking fica sem rosto.
+	if camera_enabled and camera_service != null and not camera_service.pronta() \
+			and Time.get_ticks_msec() >= int(ESPERA_MAXIMA_DA_CAMERA * 1000.0):
+		recados.append("SEM CÂMERA — O JOGO SEGUE SEM FOTO  •  " + camera_service.motivo_curto())
 	# Câmera é tratada na tela da pose com linguagem comum. O rodapé do jogo
 	# nunca expõe DLL, pacote, backend ou instruções de manutenção ao jogador.
 	if recados.is_empty():
