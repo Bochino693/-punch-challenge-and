@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $PluginGradle)) {
 }
 $PluginTexto = Get-Content -LiteralPath $PluginGradle -Raw
 if ($PluginTexto -match 'AndroidUSBCamera:libausbc:3\.3\.2') {
-    throw "COPIA ANTIGA DETECTADA: esta pasta ainda usa UVC 3.3.2. Aplique a atualizacao 1.0.64 nesta mesma pasta. Pasta atual: $PSScriptRoot"
+    throw "COPIA ANTIGA DETECTADA: esta pasta ainda usa UVC 3.3.2. Aplique a atualizacao 1.0.65 nesta mesma pasta. Pasta atual: $PSScriptRoot"
 }
 if ($PluginTexto -notmatch 'AndroidUSBCamera:libausbc:3\.2\.7') {
     throw "Dependencia UVC corrigida nao encontrada. Nao vou gerar um APK incompleto. Pasta atual: $PSScriptRoot"
@@ -42,7 +42,7 @@ if (Test-Path $ApkEsperado) {
     Remove-Item -LiteralPath $ApkEsperado -Force
 }
 
-Write-Host "Projeto confirmado: Punch Challenge Android 1.0.64 / SMART PRO VERTICAL NATIVO" -ForegroundColor Green
+Write-Host "Projeto confirmado: Punch Challenge Android 1.0.65 / REFINADO" -ForegroundColor Green
 
 if (-not (Test-Path "$env:ANDROID_HOME\platform-tools\adb.exe")) {
     throw "SDK Android invalido em C:\AndroidSdk. Falta platform-tools\adb.exe."

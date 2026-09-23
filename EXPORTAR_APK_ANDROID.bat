@@ -19,8 +19,26 @@ if not exist "android\build\build.gradle" if not exist "android\build.gradle" (
   exit /b 4
 )
 
+rem APK DE RELEASE, e nao de depuracao. O de depuracao leva as bibliotecas
+rem nativas sem otimizar e sem remover simbolos (era o que fazia o APK
+rem passar de 200 MB) e roda o GDScript com as checagens de depuracao
+rem ligadas -- mais lento justamente na TV Box.
+rem
+rem A assinatura usa a MESMA chave de sempre (a de depuracao do Godot), para
+rem o APK novo instalar POR CIMA do antigo sem apagar ranking e ajustes.
+set "CHAVE=%APPDATA%\Godot\keystores\debug.keystore"
+if not exist "%CHAVE%" (
+  echo ERRO: chave do Godot nao encontrada em %CHAVE%
+  echo Abra o projeto no editor Godot uma vez e exporte qualquer APK de teste;
+  echo o editor cria essa chave sozinho.
+  exit /b 7
+)
+set "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=%CHAVE%"
+set "GODOT_ANDROID_KEYSTORE_RELEASE_USER=androiddebugkey"
+set "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=android"
+
 if not exist "build\android" mkdir "build\android"
-"%~1" --headless --verbose --path "%CD%" --export-debug "Android" "build\android\PunchChallenge.apk"
+"%~1" --headless --path "%CD%" --export-release "Android" "build\android\PunchChallenge.apk"
 if errorlevel 1 exit /b 5
 if not exist "build\android\PunchChallenge.apk" (
   echo ERRO: o Godot terminou sem criar o APK.

@@ -1,612 +1,426 @@
 class_name PunchFX
 extends RefCounted
 
-## Partículas e ondas da tela — brasas, raios, faíscas, estilhaços e anéis.
+## EFEITOS 2D: faíscas, brasas, raios, estilhaços, poeira e confete.
 ##
-## POR QUE FICA FORA DE `main.gd`. A tela desenha tudo à mão, num `_draw`
-## só, e o resultado de um soco acende três coisas ao mesmo tempo: o que
-## voa, o que treme e o que escreve. Misturar as três num arquivo faz
-## qualquer ajuste de festa mexer no código que conta ponto — e ponto de
-## arcade é dinheiro. Aqui mora só o que voa.
+## A simulação é do MOTOR, não do GDScript. Cada tipo de partícula tem um
+## pequeno banco de emissores `CPUParticles2D` (C++, desenhados num lote
+## só) com textura própria em alta resolução (`assets/fx`, gerada por
+## `tools/gerar_fx.py`). Um pedido de 80 faíscas dispara 8 emissores de
+## 10; nada é alocado depois do arranque e nenhum laço por partícula roda
+## em script — era esse laço que derrubava o quadro depois de cada soco.
 ##
-## ------------------------------------------------------------------
-## POR QUE O CONFETE DESCIA TRAVADO — E O QUE MUDOU
+## Duas camadas: FRENTE (impacto, por cima da tela) e FUNDO (confete do
+## ranking, por trás dos cartões, para a festa nunca cobrir a informação).
 ##
-## Duas causas, e as duas eram POR PARTÍCULA. Com novecentas no ar, tudo
-## o que custa "um pouquinho" por partícula custa novecentas vezes.
-##
-## 1. CADA PARTÍCULA ERA UM `Dictionary`. Ler `p.posicao` não é ler um
-##    campo: é uma busca em tabela de espalhamento, com a chave em texto.
-##    São umas dez por partícula por quadro para mover, mais outras
-##    tantas para desenhar — mais de um milhão de buscas por segundo na
-##    hora da festa, que é exatamente a hora em que a tela já está mais
-##    cheia. E cada `Dictionary` é um objeto contado por referência:
-##    nascer e morrer novecentos deles por segundo dá trabalho ao coletor,
-##    e trabalho do coletor aparece como um quadro que demora o dobro dos
-##    vizinhos — o solavanco.
-##
-##    Agora são ARRAYS EMPACOTADOS, um por atributo (`PackedVector2Array`
-##    de posições, `PackedFloat32Array` de vidas…). A partícula `i` é o
-##    índice `i` de cada array. Não há objeto por partícula, não há chave
-##    em texto, não há lixo para recolher: mover novecentas vira percorrer
-##    um punhado de blocos de memória contígua.
-##
-## 2. CADA PARTÍCULA ERA UMA CHAMADA DE DESENHO. Novecentos `draw_line`
-##    viram novecentos comandos que o motor ordena e manda para a placa de
-##    vídeo um a um. É esse o custo que estoura numa GPU integrada, e é
-##    por isso que o travamento aparecia na comemoração e não no resto do
-##    jogo.
-##
-##    Agora TODO O CONFETE É UM DESENHO SÓ. As fitas viram triângulos num
-##    `canvas_item_add_triangle_array`: um comando, com todos os vértices
-##    e todas as cores dentro. O mesmo para brasas, faíscas e estilhaços.
-##    A festa inteira passou de umas novecentas chamadas para três.
-##
-## O teto de partículas (`LIMITE`) continua existindo, mas agora é folga e
-## não muleta: a conta cabe com sobra.
+## As ondas de choque continuam desenhadas pelo `desenhar(tela)` de quem
+## usa, com uma malha de anel: só os pixels do anel, um desenho cada.
 
-## Teto de partículas vivas. Passando disso, as mais antigas saem.
-const LIMITE := 900
+enum Tipo { FAISCA, BRASA, CHUVA, RAIO, ESTILHACO, POEIRA, CONFETE }
 
-## Os tipos, como número e não como texto.
-##
-## Comparar textos por partícula, por quadro, para escolher o desenho é o
-## mesmo custo escondido do `Dictionary` — e aqui o número ainda serve
-## para AGRUPAR: as partículas são desenhadas por tipo, e é o agrupamento
-## que permite um comando só para cada grupo.
-enum Tipo { CONFETE, BRASA, RAIO, FAISCA, ESTILHACO, POEIRA }
+## Por tipo: textura, quantas partículas por emissor, quantos emissores,
+## vida (s), gravidade (px/s²), amortecimento, escala, aditivo, camada.
+const RECEITAS := {
+	Tipo.FAISCA: {"tex": "faisca", "lote": 10, "banco": 14, "vida": 0.85, "grav": 420.0,
+		"amort": 520.0, "escala": [0.55, 1.10], "soma": true, "alinha": true},
+	Tipo.BRASA: {"tex": "faisca", "lote": 12, "banco": 18, "vida": 1.45, "grav": 700.0,
+		"amort": 260.0, "escala": [0.70, 1.35], "soma": true, "alinha": true},
+	Tipo.CHUVA: {"tex": "faisca", "lote": 10, "banco": 8, "vida": 2.3, "grav": 560.0,
+		"amort": 20.0, "escala": [0.60, 1.10], "soma": true, "alinha": true},
+	Tipo.RAIO: {"tex": "raio", "lote": 4, "banco": 8, "vida": 1.2, "grav": 560.0,
+		"amort": 380.0, "escala": [0.26, 0.42], "soma": false, "alinha": false},
+	Tipo.ESTILHACO: {"tex": "estilhaco", "lote": 5, "banco": 4, "vida": 1.6, "grav": 1150.0,
+		"amort": 60.0, "escala": [0.16, 0.30], "soma": false, "alinha": false},
+	Tipo.POEIRA: {"tex": "fumaca", "lote": 4, "banco": 10, "vida": 1.5, "grav": -60.0,
+		"amort": 180.0, "escala": [0.30, 0.65], "soma": false, "alinha": false},
+	Tipo.CONFETE: {"tex": "confete", "lote": 14, "banco": 8, "vida": 3.4, "grav": 520.0,
+		"amort": 150.0, "escala": [0.42, 0.72], "soma": false, "alinha": false},
+}
 
-## O VIGIA DO RITMO, ligado por quem cria o efeito.
-##
-## Cada função que solta partícula pergunta a ele quantas realmente
-## soltar. Num PC que está dando conta, todas; num que não está, menos —
-## e a queda acontece onde ninguém repara, em vez de aparecer como
-## animação aos trancos, que é onde todo mundo repara.
 var vigia: Desempenho = null
 
-func _quantas(pedido: int) -> int:
-	var ajustado := pedido if vigia == null else vigia.quantas(pedido)
-	# Se o pool já está cheio, criar centenas apenas para expulsar outras
-	# centenas no mesmo quadro é trabalho invisível e causa o engasgo no
-	# auge do efeito. Só nasce o que realmente cabe.
-	return mini(ajustado, maxi(0, LIMITE - _n))
+var _frente: Node2D = null
+var _fundo: Node2D = null
+var _bancos := {}          # Tipo -> Array[CPUParticles2D]
+var _proximo := {}         # Tipo -> índice do próximo emissor
+var _chuva_confete: CPUParticles2D = null
+var _chuva_confete_ate := 0.0
+var _brisas := {}          # nome -> CPUParticles2D
+var _rampas := {}          # hash das cores -> Gradient
+var _ondas: Array[Dictionary] = []
+var _relogio := 0.0
+var _aquecendo := 0
 
-# ------------------------------------------------------- as partículas
-#
-# UM ARRAY POR ATRIBUTO, e a partícula `i` é o índice `i` de todos eles.
-# É mais trabalhoso de escrever e é a diferença entre a festa rodar lisa
-# e a festa engasgar; ver o cabeçalho.
-var _posicao := PackedVector2Array()
-var _velocidade := PackedVector2Array()
-var _cor := PackedColorArray()
-var _vida := PackedFloat32Array()
-var _vida_total := PackedFloat32Array()
-var _tamanho := PackedFloat32Array()
-var _giro := PackedFloat32Array()
-var _giro_velocidade := PackedFloat32Array()
-var _gravidade := PackedFloat32Array()
-var _arrasto := PackedFloat32Array()
-var _tipo := PackedInt32Array()
-var _n := 0
-
-var _ondas: Array = []
-
-# Buffers de desenho, reaproveitados entre quadros. Recriá-los a cada
-# quadro devolveria pela porta dos fundos o lixo que os arrays
-# empacotados vieram eliminar.
-var _v := PackedVector2Array()
-var _c := PackedColorArray()
-var _idx := PackedInt32Array()
-## AS COORDENADAS DE TEXTURA DO LOTE.
-##
-## POR QUE O CONFETE PARECIA ENRUGADO. Cada partícula era um
-## quadrilátero de COR CHAPADA, sem textura: quatro quinas vivas e um
-## miolo de cor sólida. Num monitor de perto isso passa; numa TV de
-## cinquenta polegadas, onde cada pixel do jogo vira três ou quatro da
-## tela, o que se vê é um retalho de papel com serrilha — e é exatamente
-## a palavra que descreve o defeito.
-##
-## Com uma textura de borda macia e quatro UVs por partícula, o MESMO
-## quadrilátero passa a ter contorno que se dissolve. Não custa vértice
-## nenhum a mais, não custa chamada de desenho nenhuma a mais: custa um
-## `PackedVector2Array` do mesmo tamanho do de posições e uma amarração
-## de textura por lote. É a diferença entre confete recortado a tesoura
-## e confete de verdade.
-var _uv := PackedVector2Array()
-
-## A TEXTURA DE BORDA MACIA, calculada uma vez no arranque.
-##
-## Não vem de arquivo: são 32 × 32 pixels calculados aqui, o que evita
-## um PNG a mais no pacote e um `load` no meio da festa. O perfil é um
-## PLANALTO com rampa nas bordas — cheio no miolo, zero na borda —, e
-## não uma bola. A diferença importa porque o mesmo quadrilátero serve
-## para coisas muito diferentes: numa fita longa e estreita, um perfil
-## de bola apagaria o meio; o planalto deixa o corpo inteiro aceso e só
-## dissolve as quinas.
-static var _pincel: ImageTexture = null
-
-static func _pincel_macio() -> ImageTexture:
-	if _pincel != null:
-		return _pincel
-	const LADO := 32
-	const RAMPA := 0.22
-	var img := Image.create_empty(LADO, LADO, false, Image.FORMAT_RGBA8)
-	for y in range(LADO):
-		var v := (float(y) + 0.5) / float(LADO)
-		for x in range(LADO):
-			var u := (float(x) + 0.5) / float(LADO)
-			var fu := clampf((0.5 - absf(u - 0.5)) / RAMPA, 0.0, 1.0)
-			var fv := clampf((0.5 - absf(v - 0.5)) / RAMPA, 0.0, 1.0)
-			var a := fu * fv
-			# Suavização de Hermite: tira o vinco que uma rampa reta
-			# deixa no ponto em que ela encontra o planalto.
-			a = a * a * (3.0 - 2.0 * a)
-			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
-	_pincel = ImageTexture.create_from_image(img)
-	return _pincel
+static var _texturas := {}
 
 
+static func _textura(nome: String) -> Texture2D:
+	if not _texturas.has(nome):
+		_texturas[nome] = load("res://assets/fx/%s.png" % nome)
+	return _texturas[nome]
+
+
+## Cria as camadas e todos os emissores. Chamar uma vez, no `_ready` de
+## quem vai exibir os efeitos.
+func montar(pai: CanvasItem, z_frente := 1, z_fundo := -1) -> void:
+	if _frente != null:
+		return
+	_frente = _camada(pai, "EfeitosFrente", z_frente)
+	_fundo = _camada(pai, "EfeitosFundo", z_fundo)
+	for tipo in RECEITAS:
+		var banco: Array[CPUParticles2D] = []
+		for i in range(int(RECEITAS[tipo]["banco"])):
+			# O confete é só do ranking: mora no fundo, atrás dos cartões.
+			banco.append(_emissor(tipo, _fundo if tipo == Tipo.CONFETE else _frente))
+		_bancos[tipo] = banco
+		_proximo[tipo] = 0
+	_chuva_confete = _emissor(Tipo.CONFETE, _fundo)
+	_chuva_confete.one_shot = false
+	_chuva_confete.explosiveness = 0.0
+	_chuva_confete.amount = 170
+	_chuva_confete.lifetime = 4.6
+	_chuva_confete.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	_chuva_confete.emission_rect_extents = Vector2(560.0, 30.0)
+	_chuva_confete.position = Vector2(540.0, -60.0)
+	_chuva_confete.direction = Vector2(0.0, 1.0)
+	_chuva_confete.spread = 18.0
+	_chuva_confete.gravity = Vector2(0.0, 150.0)
+	_chuva_confete.damping_min = 4.0
+	_chuva_confete.damping_max = 12.0
+
+
+static func _camada(pai: CanvasItem, nome: String, z: int) -> Node2D:
+	var camada := Node2D.new()
+	camada.name = nome
+	camada.z_index = z
+	pai.add_child(camada)
+	return camada
+
+
+func _emissor(tipo: Tipo, camada: Node2D) -> CPUParticles2D:
+	var r: Dictionary = RECEITAS[tipo]
+	var p := CPUParticles2D.new()
+	p.emitting = false
+	p.visible = false
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.amount = int(r["lote"])
+	p.lifetime = float(r["vida"])
+	p.lifetime_randomness = 0.45
+	# Coordenadas locais: gravidade e direção valem no espaço do jogo,
+	# inclusive com a tela girada 90° na TV Box, e as partículas tremem
+	# junto com a tela.
+	p.local_coords = true
+	p.texture = _textura(str(r["tex"]))
+	p.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	p.gravity = Vector2(0.0, float(r["grav"]))
+	p.damping_min = float(r["amort"]) * 0.6
+	p.damping_max = float(r["amort"])
+	p.scale_amount_min = float(r["escala"][0])
+	p.scale_amount_max = float(r["escala"][1])
+	p.particle_flag_align_y = bool(r["alinha"])
+	p.spread = 180.0
+	var some := Gradient.new()
+	some.set_color(0, Color(1, 1, 1, 1))
+	some.set_color(1, Color(1, 1, 1, 0))
+	some.add_point(0.7, Color(1, 1, 1, 0.85))
+	p.color_ramp = some
+	var mat := CanvasItemMaterial.new()
+	if bool(r["soma"]):
+		mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	if tipo == Tipo.CONFETE:
+		mat.particles_animation = true
+		mat.particles_anim_h_frames = 8
+		mat.particles_anim_v_frames = 1
+		mat.particles_anim_loop = true
+		p.anim_speed_min = 3.0
+		p.anim_speed_max = 7.0
+		p.anim_offset_max = 1.0
+		p.angle_min = 0.0
+		p.angle_max = 360.0
+		p.angular_velocity_min = -260.0
+		p.angular_velocity_max = 260.0
+		var papel := Gradient.new()
+		papel.set_color(0, Color(1, 1, 1, 1))
+		papel.set_color(1, Color(1, 1, 1, 0))
+		papel.add_point(0.85, Color(1, 1, 1, 1))
+		p.color_ramp = papel
+	elif tipo in [Tipo.RAIO, Tipo.ESTILHACO]:
+		p.angle_min = 0.0
+		p.angle_max = 360.0
+		p.angular_velocity_min = -300.0
+		p.angular_velocity_max = 300.0
+	elif tipo == Tipo.POEIRA:
+		var cresce := Curve.new()
+		cresce.add_point(Vector2(0.0, 0.55))
+		cresce.add_point(Vector2(1.0, 1.25))
+		p.scale_amount_curve = cresce
+	if tipo in [Tipo.FAISCA, Tipo.BRASA, Tipo.CHUVA]:
+		var afina := Curve.new()
+		afina.add_point(Vector2(0.0, 1.0))
+		afina.add_point(Vector2(1.0, 0.35))
+		p.scale_amount_curve = afina
+	p.material = mat
+	camada.add_child(p)
+	return p
+
+
+# ------------------------------------------------------------ controle
 func limpar() -> void:
-	_n = 0
 	_ondas.clear()
+	for banco in _bancos.values():
+		for p: CPUParticles2D in banco:
+			p.emitting = false
+			p.visible = false
+	if _chuva_confete != null:
+		_chuva_confete.emitting = false
+		_chuva_confete.visible = false
 
 
 func vivo() -> bool:
-	return _n > 0 or not _ondas.is_empty()
+	return not _ondas.is_empty()
 
 
-## Quantas partículas estão no ar. A Central mostra este número: quando a
-## festa pesa, é ele que diz se o problema é quantidade ou outra coisa.
-func quantidade() -> int:
-	return _n
-
-
-## A MORTE DE UMA PARTÍCULA É UMA TROCA COM A ÚLTIMA.
-##
-## Remover do meio de um array empurra tudo o que vem depois — com
-## centenas morrendo por segundo, isso é copiar a lista inteira várias
-## vezes por quadro. Trocando com a última e encurtando em um, a remoção
-## custa o mesmo para qualquer posição. A ordem se embaralha, e para
-## partículas isso não significa nada.
-func _matar(i: int) -> void:
-	var ultimo := _n - 1
-	if i != ultimo:
-		_posicao[i] = _posicao[ultimo]
-		_velocidade[i] = _velocidade[ultimo]
-		_cor[i] = _cor[ultimo]
-		_vida[i] = _vida[ultimo]
-		_vida_total[i] = _vida_total[ultimo]
-		_tamanho[i] = _tamanho[ultimo]
-		_giro[i] = _giro[ultimo]
-		_giro_velocidade[i] = _giro_velocidade[ultimo]
-		_gravidade[i] = _gravidade[ultimo]
-		_arrasto[i] = _arrasto[ultimo]
-		_tipo[i] = _tipo[ultimo]
-	_n = ultimo
+## A frente acompanha o tremor e o zoom da tela, como o resto do desenho.
+func seguir(origem: Vector2, escala: Vector2) -> void:
+	if _frente != null:
+		_frente.position = origem
+		_frente.scale = escala
 
 
 func atualizar(delta: float) -> void:
-	var i := 0
-	while i < _n:
-		var vida := _vida[i] - delta
-		if vida <= 0.0:
-			_matar(i)
-			continue
-		_vida[i] = vida
-		var vel := _velocidade[i]
-		vel.y += _gravidade[i] * delta
-		vel *= 1.0 - _arrasto[i] * delta
-		_velocidade[i] = vel
-		_posicao[i] += vel * delta
-		_giro[i] += _giro_velocidade[i] * delta
-		i += 1
+	_relogio += delta
 	for k in range(_ondas.size() - 1, -1, -1):
-		var o: Dictionary = _ondas[k]
-		o.tempo += delta
-		if o.tempo >= o.duracao:
+		var o := _ondas[k]
+		o["tempo"] = float(o["tempo"]) + delta
+		if float(o["tempo"]) >= float(o["duracao"]):
 			_ondas.remove_at(k)
+	if _chuva_confete != null and _chuva_confete.emitting and _relogio > _chuva_confete_ate:
+		_chuva_confete.emitting = false
+	if _aquecendo > 0:
+		_aquecendo -= 1
+		if _aquecendo == 0:
+			limpar()
+			_frente.modulate = Color.WHITE
+			_fundo.modulate = Color.WHITE
 
 
-# ----------------------------------------------------------- o desenho
-#
-# TUDO EM TRIÂNGULOS, E TODOS OS TRIÂNGULOS DE UM TIPO NUM COMANDO SÓ.
-#
-# `canvas_item_add_triangle_array` recebe vértices, cores e índices de uma
-# vez. Um quadrilátero são dois triângulos; uma linha grossa é um
-# quadrilátero. Então confete, brasa, faísca e estilhaço — que antes eram
-# um `draw_line` ou um `draw_circle` cada — cabem todos na mesma lista, e
-# a lista vai inteira numa chamada.
+## Dispara um lote de cada tipo quase invisível: compila o shader das
+## partículas e sobe as texturas antes do primeiro soco.
+func aquecer() -> void:
+	if _frente == null:
+		return
+	_frente.modulate = Color(1, 1, 1, 0.004)
+	_fundo.modulate = Color(1, 1, 1, 0.004)
+	var meio := Vector2(540.0, 960.0)
+	for tipo in RECEITAS:
+		_disparar(tipo, meio, 1, Color.WHITE, 300.0)
+	chuva_de_confete(1080.0, 10, [Color.WHITE])
+	_aquecendo = 4
+
 
 func desenhar(tela: CanvasItem) -> void:
+	if _ondas.is_empty():
+		return
+	var anel := _malha_do_anel()
 	for o in _ondas:
-		var t: float = o.tempo / o.duracao
-		var raio: float = lerpf(o.raio_inicial, o.raio_final, ease(t, 0.35))
-		var cor: Color = o.cor
-		cor.a *= 1.0 - t
-		Traco.arco(tela, o.centro, raio, cor, o.espessura * (1.0 - t * 0.7))
-	if _n == 0:
-		return
-	var item := tela.get_canvas_item()
-	_desenhar_fitas(item)
-	_desenhar_riscos(item)
-	_desenhar_formas(item, tela)
+		var t: float = float(o["tempo"]) / float(o["duracao"])
+		var raio: float = lerpf(float(o["raio_inicial"]), float(o["raio_final"]), ease(t, 0.35))
+		var cor: Color = o["cor"]
+		cor.a *= (1.0 - t) * (1.0 - t)
+		tela.draw_mesh(anel, null, Transform2D(0.0, Vector2(raio, raio), 0.0, o["centro"]), cor)
 
 
-## Início do lote: os buffers voltam a ficar vazios sem devolver a
-## memória ao sistema, para o quadro seguinte reaproveitá-la.
-func _abrir_lote() -> void:
-	_v.clear()
-	_c.clear()
-	_idx.clear()
-	_uv.clear()
+## Anel de raio 1 feito de triângulos, com borda que some para dentro e
+## para fora. Desenhado com escala, preenche só os pixels do anel — um
+## quadrado com textura de anel preencheria a tela inteira a cada onda.
+static var _anel: ArrayMesh = null
+
+static func _malha_do_anel() -> ArrayMesh:
+	if _anel != null:
+		return _anel
+	const LADOS := 96
+	const RAIOS := [0.86, 0.955, 1.0]
+	const ALFAS := [0.0, 1.0, 0.0]
+	var v := PackedVector2Array()
+	var c := PackedColorArray()
+	var idx := PackedInt32Array()
+	for i in range(LADOS):
+		var dir := Vector2.from_angle(float(i) / float(LADOS) * TAU)
+		for k in range(3):
+			v.append(dir * float(RAIOS[k]))
+			c.append(Color(1, 1, 1, float(ALFAS[k])))
+	for i in range(LADOS):
+		var a := i * 3
+		var b := ((i + 1) % LADOS) * 3
+		for k in range(2):
+			idx.append_array([a + k, b + k, b + k + 1, a + k, b + k + 1, a + k + 1])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = v
+	arrays[Mesh.ARRAY_COLOR] = c
+	arrays[Mesh.ARRAY_INDEX] = idx
+	_anel = ArrayMesh.new()
+	_anel.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return _anel
 
 
-## Um quadrilátero, em dois triângulos, com a mesma cor nos quatro cantos.
-func _quad(a: Vector2, b: Vector2, c: Vector2, d: Vector2, cor: Color) -> void:
-	var base := _v.size()
-	_v.push_back(a)
-	_v.push_back(b)
-	_v.push_back(c)
-	_v.push_back(d)
-	# Os quatro cantos da textura, na MESMA ordem dos quatro vértices.
-	# Em `_risco`, U corre ao longo da fita e V atravessa a largura —
-	# então a mesma textura dissolve as pontas de uma faísca e as quinas
-	# de um quadradinho de poeira, sem código separado para cada um.
-	_uv.push_back(Vector2(0.0, 0.0))
-	_uv.push_back(Vector2(1.0, 0.0))
-	_uv.push_back(Vector2(1.0, 1.0))
-	_uv.push_back(Vector2(0.0, 1.0))
-	for _k in range(4):
-		_c.push_back(cor)
-	_idx.push_back(base)
-	_idx.push_back(base + 1)
-	_idx.push_back(base + 2)
-	_idx.push_back(base)
-	_idx.push_back(base + 2)
-	_idx.push_back(base + 3)
+# ------------------------------------------------------------ disparo
+func _quantos_lotes(tipo: Tipo, pedido: int) -> int:
+	var n := pedido if vigia == null else vigia.quantas(pedido)
+	var lote := int(RECEITAS[tipo]["lote"])
+	return clampi(int(ceil(float(n) / float(lote))), 1, int(RECEITAS[tipo]["banco"]))
 
 
-## Uma linha grossa vira um quadrilátero — é assim que o motor desenha
-## `draw_line` por dentro, só que aqui todas vão juntas.
-func _risco(de: Vector2, ate: Vector2, largura: float, cor: Color) -> void:
-	var direcao := ate - de
-	var comprimento := direcao.length()
-	if comprimento < 0.0001:
-		return
-	var lado := Vector2(-direcao.y, direcao.x) / comprimento * (largura * 0.5)
-	_quad(de + lado, ate + lado, ate - lado, de - lado, cor)
+func _proximo_emissor(tipo: Tipo) -> CPUParticles2D:
+	var banco: Array = _bancos[tipo]
+	var i: int = _proximo[tipo]
+	_proximo[tipo] = (i + 1) % banco.size()
+	return banco[i]
 
 
-func _fechar_lote(item: RID) -> void:
-	if _idx.is_empty():
-		return
-	# A TEXTURA ENTRA AQUI, no mesmo comando. Continua sendo UM desenho
-	# por lote: o que muda é que agora ele tem contorno macio em vez de
-	# quina viva.
-	RenderingServer.canvas_item_add_triangle_array(
-		item, _idx, _v, _c, _uv, PackedInt32Array(), PackedFloat32Array(),
-		_pincel_macio().get_rid()
-	)
+func _rampa(cores: Array) -> Gradient:
+	# Uma cor sorteada por partícula: degraus constantes, um por cor.
+	var chave := hash(cores)
+	if _rampas.has(chave):
+		return _rampas[chave]
+	var g := Gradient.new()
+	g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_CONSTANT
+	var n := maxi(cores.size(), 1)
+	g.offsets = PackedFloat32Array([0.0])
+	g.colors = PackedColorArray([cores[0] if not cores.is_empty() else Color.WHITE])
+	for i in range(1, n):
+		g.add_point(float(i) / float(n), cores[i])
+	_rampas[chave] = g
+	return g
 
 
-func _cor_viva(i: int) -> Color:
-	var cor := _cor[i]
-	cor.a *= clampf(_vida[i] / maxf(_vida_total[i], 0.0001), 0.0, 1.0)
-	return cor
-
-
-## O CONFETE. Uma fita é um retângulo estreito girando; a largura muda com
-## o giro para dar a impressão de papel virando de lado.
-func _desenhar_fitas(item: RID) -> void:
-	_abrir_lote()
-	for i in range(_n):
-		if _tipo[i] != Tipo.CONFETE:
-			continue
-		var giro := _giro[i]
-		var direcao := Vector2.from_angle(giro * 0.35)
-		var metade := _tamanho[i] * 1.65
-		var largura: float = maxf(1.2, _tamanho[i] * (0.20 + 0.80 * absf(cos(giro))))
-		_risco(_posicao[i] - direcao * metade, _posicao[i] + direcao * metade, largura, _cor_viva(i))
-	_fechar_lote(item)
-
-
-## BRASA, FAÍSCA E POEIRA: tudo o que é um risco na direção do voo.
-##
-## A brasa ganhava três desenhos (rastro frio, corpo quente e uma bola
-## branca na cabeça) e é a partícula mais numerosa do impacto. Aqui os
-## três continuam existindo — são três quadriláteros —, mas somem dentro
-## do mesmo comando das outras.
-func _desenhar_riscos(item: RID) -> void:
-	_abrir_lote()
-	for i in range(_n):
-		var tipo := _tipo[i]
-		if tipo != Tipo.BRASA and tipo != Tipo.FAISCA and tipo != Tipo.POEIRA:
-			continue
-		var cor := _cor_viva(i)
-		var pos := _posicao[i]
-		var vel := _velocidade[i]
-		var tam := _tamanho[i]
-		if tipo == Tipo.POEIRA:
-			# Poeira é um borrãozinho: um quadrado girado 45° custa dois
-			# triângulos e lê como pontinho redondo em movimento.
-			_quad(
-				pos + Vector2(0, -tam), pos + Vector2(tam, 0),
-				pos + Vector2(0, tam), pos + Vector2(-tam, 0), cor
-			)
-			continue
-		var comprimento := vel.length()
-		if comprimento < 0.0001:
-			continue
-		var unidade := vel / comprimento
-		if tipo == Tipo.FAISCA:
-			_risco(pos - unidade * tam * 3.5, pos, maxf(1.5, tam * 0.6), cor)
-			continue
-		# BRASA: rastro frio longo, corpo quente curto e a cabeça branca.
-		var rastro: float = clampf(comprimento * 0.045, 10.0, 90.0)
-		var frio := cor
-		frio.a *= 0.25
-		_risco(pos - unidade * rastro, pos, tam * 0.7, frio)
-		_risco(pos - unidade * rastro * 0.35, pos, tam, cor)
-		var r2 := tam * 0.7
-		_quad(
-			pos + Vector2(-r2, -r2), pos + Vector2(r2, -r2),
-			pos + Vector2(r2, r2), pos + Vector2(-r2, r2),
-			Color(1, 1, 1, cor.a * 0.85)
-		)
-	_fechar_lote(item)
-
-
-## ESTILHAÇO em lote; o RAIO, que é côncavo, continua por fora.
-func _desenhar_formas(item: RID, tela: CanvasItem) -> void:
-	_abrir_lote()
-	for i in range(_n):
-		if _tipo[i] != Tipo.ESTILHACO:
-			continue
-		var pos := _posicao[i]
-		var tam := _tamanho[i]
-		var g := _giro[i]
-		var base := _v.size()
-		_v.push_back(pos + Vector2(0, -tam).rotated(g))
-		_v.push_back(pos + Vector2(tam, tam * 0.6).rotated(g))
-		_v.push_back(pos + Vector2(-tam * 0.8, tam).rotated(g))
-		# O ESTILHAÇO É UM TRIÂNGULO, e não um quadrilátero — mas o lote
-		# é um só e todo vértice precisa da sua coordenada de textura,
-		# senão os arrays saem de tamanhos diferentes e o comando é
-		# recusado inteiro. Os três cantos pegam o miolo do pincel, que é
-		# opaco: o estilhaço continua sólido, como tem de ser.
-		_uv.push_back(Vector2(0.5, 0.5))
-		_uv.push_back(Vector2(0.5, 0.5))
-		_uv.push_back(Vector2(0.5, 0.5))
-		var cor := _cor_viva(i)
-		for _k in range(3):
-			_c.push_back(cor)
-		_idx.push_back(base)
-		_idx.push_back(base + 1)
-		_idx.push_back(base + 2)
-	_fechar_lote(item)
-	# O raio tem seis pontas e é côncavo: triangular à mão daria mais
-	# código do que vale por umas poucas dezenas deles. `Traco.poligono`
-	# continua servindo, e são os únicos que ainda custam um desenho cada.
-	for i in range(_n):
-		if _tipo[i] != Tipo.RAIO:
-			continue
-		Traco.poligono(
-			tela, _forma_de_raio(_posicao[i], _tamanho[i], _giro[i]), _cor_viva(i)
-		)
-
-
-## O contorno de um raio de seis pontas, na escala e no giro pedidos.
-static func _forma_de_raio(centro: Vector2, tamanho: float, giro: float) -> PackedVector2Array:
-	const MOLDE := [
-		Vector2(0.10, -1.00), Vector2(-0.55, 0.10), Vector2(-0.10, 0.10),
-		Vector2(-0.20, 1.00), Vector2(0.55, -0.15), Vector2(0.08, -0.15),
-	]
-	var pontos := PackedVector2Array()
-	for ponto in MOLDE:
-		pontos.append(centro + (ponto as Vector2).rotated(giro) * tamanho)
-	return pontos
-
-
-# ------------------------------------------------------- o nascimento
-func _nascer(
-	tipo: Tipo, posicao: Vector2, velocidade: Vector2, cor: Color, vida: float,
-	tamanho: float, gravidade: float, arrasto: float,
-	giro := 0.0, giro_velocidade := 0.0
+## Configura e solta `lotes` emissores do tipo, no ponto. `cor` tinge; se
+## `cores` vier, cada partícula sorteia uma delas.
+func _disparar(
+	tipo: Tipo, onde: Vector2, lotes: int, cor: Color, forca: float,
+	cores: Array = [], direcao := Vector2.ZERO, abertura := 180.0, espalhar := 0.0
 ) -> void:
-	if _n >= LIMITE:
-		# Cheio: uma cede o lugar. Com a troca-com-a-última do `_matar`, a
-		# posição 0 não é exatamente a mais antiga — e não precisa ser. O
-		# que importa é o teto ser respeitado sem custo.
-		_matar(0)
-	var i := _n
-	_n += 1
-	if _posicao.size() <= i:
-		# Os arrays crescem até o teto e param. Depois disso o espaço é
-		# sempre reaproveitado: nenhuma alocação no meio da festa.
-		_posicao.resize(i + 1)
-		_velocidade.resize(i + 1)
-		_cor.resize(i + 1)
-		_vida.resize(i + 1)
-		_vida_total.resize(i + 1)
-		_tamanho.resize(i + 1)
-		_giro.resize(i + 1)
-		_giro_velocidade.resize(i + 1)
-		_gravidade.resize(i + 1)
-		_arrasto.resize(i + 1)
-		_tipo.resize(i + 1)
-	_posicao[i] = posicao
-	_velocidade[i] = velocidade
-	_cor[i] = cor
-	_vida[i] = vida
-	_vida_total[i] = vida
-	_tamanho[i] = tamanho
-	_gravidade[i] = gravidade
-	_arrasto[i] = arrasto
-	_giro[i] = giro
-	_giro_velocidade[i] = giro_velocidade
-	_tipo[i] = tipo
+	if _frente == null:
+		return
+	for _i in range(lotes):
+		var p := _proximo_emissor(tipo)
+		p.position = onde
+		p.color = cor
+		p.color_initial_ramp = _rampa(cores) if not cores.is_empty() else null
+		p.initial_velocity_min = forca * 0.30
+		p.initial_velocity_max = forca
+		p.direction = direcao if direcao != Vector2.ZERO else Vector2.RIGHT
+		p.spread = abertura
+		if espalhar > 0.0:
+			p.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE
+			p.emission_sphere_radius = espalhar
+		else:
+			p.emission_shape = CPUParticles2D.EMISSION_SHAPE_POINT
+		p.visible = true
+		p.restart()
 
 
-func onda(centro: Vector2, raio_inicial: float, raio_final: float, cor: Color, espessura: float = 8.0, duracao: float = 0.7) -> void:
+# --------------------------------------------------- a API dos efeitos
+func onda(centro: Vector2, raio_inicial: float, raio_final: float, cor: Color, _espessura: float = 8.0, duracao: float = 0.7) -> void:
 	_ondas.append({
-		"centro": centro,
-		"raio_inicial": raio_inicial,
-		"raio_final": raio_final,
-		"cor": cor,
-		"espessura": espessura,
-		"duracao": maxf(0.05, duracao),
-		"tempo": 0.0,
+		"centro": centro, "raio_inicial": raio_inicial, "raio_final": raio_final,
+		"cor": cor, "duracao": maxf(0.05, duracao), "tempo": 0.0,
 	})
 
 
-func confete(centro: Vector2, quantidade: int, cores: Array, forca: float = 900.0) -> void:
-	for i in range(_quantas(quantidade)):
-		var angulo := randf_range(-PI, 0.0)
-		_nascer(
-			Tipo.CONFETE,
-			centro + Vector2(randf_range(-40.0, 40.0), randf_range(-20.0, 20.0)),
-			Vector2(cos(angulo), sin(angulo)) * randf_range(forca * 0.35, forca),
-			cores[randi() % cores.size()],
-			randf_range(1.6, 3.1),
-			randf_range(5.0, 11.0),
-			randf_range(760.0, 1150.0),
-			0.9,
-			randf_range(0.0, TAU),
-			randf_range(-9.0, 9.0)
-		)
-
-
-## Chuva distribuída pela tela, usada na premiação. Nasce em várias alturas
-## para a festa já aparecer cheia sem despejar todas as partículas no mesmo
-## quadro visual. A quantidade passa pelo vigia de desempenho normalmente.
-func chuva_de_confete(largura: float, quantidade: int, cores: Array, intensidade := 1.0) -> void:
-	var escala := clampf(intensidade, 0.35, 1.4)
-	for i in range(_quantas(quantidade)):
-		_nascer(
-			Tipo.CONFETE,
-			Vector2(randf_range(25.0, largura - 25.0), randf_range(-520.0, -20.0)),
-			Vector2(randf_range(-120.0, 120.0), randf_range(260.0, 520.0) * escala),
-			cores[randi() % cores.size()],
-			randf_range(2.2, 3.8),
-			randf_range(5.0, 10.0),
-			randf_range(620.0, 980.0),
-			0.42,
-			randf_range(0.0, TAU),
-			randf_range(-8.0, 8.0)
-		)
-
-
-## A CHUVA DE BRASAS, no lugar da chuva de confete.
-##
-## Cai mais rápido e mais reta do que o confete caía: confete plana no ar,
-## e planar é o gesto de uma festa de aniversário. Brasa despenca.
-func chuva_de_brasas(largura: float, quantidade: int, cores: Array) -> void:
-	for i in range(_quantas(quantidade)):
-		_nascer(
-			Tipo.BRASA,
-			Vector2(randf_range(0.0, largura), randf_range(-300.0, -20.0)),
-			Vector2(randf_range(-40.0, 40.0), randf_range(520.0, 980.0)),
-			cores[randi() % cores.size()],
-			randf_range(1.6, 2.8),
-			randf_range(3.0, 6.5),
-			randf_range(420.0, 720.0),
-			0.25
-		)
-
-
-## A EXPLOSÃO DO GOLPE: brasas para todo lado e alguns raios girando.
-##
-## Sai do ponto do impacto, e não do alto da tela, porque quem manda na
-## comemoração é o soco — a origem tem de ser o lugar onde ele aterrissou.
-func explosao(centro: Vector2, quantidade: int, cores: Array, forca: float = 1100.0) -> void:
-	for i in range(_quantas(quantidade)):
-		var angulo := randf_range(0.0, TAU)
-		var direcao := Vector2(cos(angulo), sin(angulo))
-		# Achatada na vertical: uma explosão redonda em tela alta some
-		# pelas laterais antes de a pessoa ver.
-		direcao.y *= 0.75
-		_nascer(
-			Tipo.BRASA,
-			centro + direcao * randf_range(0.0, 70.0),
-			direcao * randf_range(forca * 0.30, forca),
-			cores[randi() % cores.size()],
-			randf_range(0.9, 1.9),
-			randf_range(3.0, 7.0),
-			randf_range(520.0, 900.0),
-			1.1
-		)
-
-
-## Raios saindo do ponto do soco, girando enquanto voam.
-func raios(centro: Vector2, quantidade: int, cor: Color, forca: float = 780.0) -> void:
-	for i in range(_quantas(quantidade)):
-		var angulo := randf_range(0.0, TAU)
-		_nascer(
-			Tipo.RAIO,
-			centro,
-			Vector2(cos(angulo), sin(angulo) * 0.8) * randf_range(forca * 0.4, forca),
-			cor,
-			randf_range(0.8, 1.6),
-			randf_range(16.0, 34.0),
-			randf_range(420.0, 760.0),
-			1.3,
-			randf_range(0.0, TAU),
-			randf_range(-7.0, 7.0)
-		)
-
-
 func faiscas(centro: Vector2, quantidade: int, cor: Color, forca: float = 1000.0) -> void:
-	for i in range(_quantas(quantidade)):
-		var angulo := randf_range(0.0, TAU)
-		var tom := cor
-		tom.a = randf_range(0.65, 1.0)
-		_nascer(
-			Tipo.FAISCA,
-			centro,
-			Vector2(cos(angulo), sin(angulo)) * randf_range(forca * 0.25, forca),
-			tom,
-			randf_range(0.45, 1.05),
-			randf_range(2.0, 4.5),
-			randf_range(240.0, 620.0),
-			2.2
-		)
+	_disparar(Tipo.FAISCA, centro, _quantos_lotes(Tipo.FAISCA, quantidade), cor, forca)
+
+
+func explosao(centro: Vector2, quantidade: int, cores: Array, forca: float = 1100.0) -> void:
+	_disparar(Tipo.BRASA, centro, _quantos_lotes(Tipo.BRASA, quantidade), Color.WHITE, forca, cores, Vector2.ZERO, 180.0, 40.0)
+
+
+func raios(centro: Vector2, quantidade: int, cor: Color, forca: float = 780.0) -> void:
+	_disparar(Tipo.RAIO, centro, _quantos_lotes(Tipo.RAIO, quantidade), cor, forca)
 
 
 func estilhacos(centro: Vector2, quantidade: int, cor: Color) -> void:
-	## O que cai quando o soco foi fraco: pedaço escuro, pesado, sem brilho.
-	for i in range(_quantas(quantidade)):
-		var angulo := randf_range(-PI * 0.85, -PI * 0.15)
-		_nascer(
-			Tipo.ESTILHACO,
-			centro + Vector2(randf_range(-120.0, 120.0), randf_range(-40.0, 40.0)),
-			Vector2(cos(angulo), sin(angulo)) * randf_range(140.0, 420.0),
-			cor,
-			randf_range(1.1, 2.0),
-			randf_range(6.0, 15.0),
-			randf_range(900.0, 1400.0),
-			0.4,
-			randf_range(0.0, TAU),
-			randf_range(-5.0, 5.0)
-		)
+	_disparar(Tipo.ESTILHACO, centro, _quantos_lotes(Tipo.ESTILHACO, quantidade), cor, 420.0, [], Vector2.UP, 55.0, 90.0)
 
 
 func poeira(centro: Vector2, quantidade: int, cor: Color, alcance: float = 420.0) -> void:
-	for i in range(_quantas(quantidade)):
-		var angulo := randf_range(0.0, TAU)
-		var direcao := Vector2(cos(angulo), sin(angulo))
-		_nascer(
-			Tipo.POEIRA,
-			centro + direcao * randf_range(0.0, 60.0),
-			direcao * randf_range(alcance * 0.2, alcance),
-			cor,
-			randf_range(0.8, 1.8),
-			randf_range(2.0, 6.0),
-			-randf_range(20.0, 90.0),
-			1.6
-		)
+	_disparar(Tipo.POEIRA, centro, _quantos_lotes(Tipo.POEIRA, quantidade), cor, alcance, [], Vector2.ZERO, 180.0, 40.0)
+
+
+## Brasas caindo do teto, espalhadas pela largura da tela.
+func chuva_de_brasas(largura: float, quantidade: int, cores: Array) -> void:
+	if _frente == null:
+		return
+	for _i in range(_quantos_lotes(Tipo.CHUVA, quantidade)):
+		var p := _proximo_emissor(Tipo.CHUVA)
+		p.position = Vector2(largura * 0.5, -120.0)
+		p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+		p.emission_rect_extents = Vector2(largura * 0.5, 120.0)
+		p.color = Color.WHITE
+		p.color_initial_ramp = _rampa(cores)
+		p.direction = Vector2.DOWN
+		p.spread = 8.0
+		p.initial_velocity_min = 480.0
+		p.initial_velocity_max = 900.0
+		p.visible = true
+		p.restart()
+
+
+## Canhão de confete: sai do ponto para cima, abre e cai girando.
+func confete(centro: Vector2, quantidade: int, cores: Array, forca: float = 900.0) -> void:
+	_disparar(Tipo.CONFETE, centro, _quantos_lotes(Tipo.CONFETE, quantidade), Color.WHITE, forca * 1.25, cores, Vector2.UP, 24.0, 30.0)
+
+
+## Chuva contínua de confete (por trás dos cartões). Cada chamada mantém
+## a chuva ligada por mais um instante; parar de chamar é parar a chuva.
+func chuva_de_confete(largura: float, _quantidade: int, cores: Array, intensidade := 1.0) -> void:
+	if _chuva_confete == null:
+		return
+	_chuva_confete.position.x = largura * 0.5
+	_chuva_confete.color_initial_ramp = _rampa(cores)
+	var escala := clampf(intensidade, 0.35, 1.4)
+	_chuva_confete.initial_velocity_min = 90.0 * escala
+	_chuva_confete.initial_velocity_max = 220.0 * escala
+	_chuva_confete_ate = _relogio + 0.45
+	if not _chuva_confete.emitting:
+		_chuva_confete.visible = true
+		_chuva_confete.emitting = true
 
 
 func fogos(centro: Vector2, cores: Array) -> void:
 	var cor: Color = cores[randi() % cores.size()]
-	onda(centro, 6.0, randf_range(120.0, 210.0), Color(cor.r, cor.g, cor.b, 0.55), 5.0, 0.55)
-	faiscas(centro, 46, cor, 780.0)
+	onda(centro, 6.0, randf_range(120.0, 210.0), Color(cor, 0.55), 5.0, 0.55)
+	faiscas(centro, 40, cor, 780.0)
+
+
+## Poeira ambiente contínua (a respiração do cenário). Um emissor por
+## nome, criado na primeira chamada; `ligada` liga e desliga.
+func brisa(nome: String, area: Rect2, cor: Color, por_segundo := 3.0, ligada := true) -> void:
+	if _fundo == null:
+		return
+	var p: CPUParticles2D = _brisas.get(nome)
+	if p == null:
+		p = _emissor(Tipo.POEIRA, _fundo)
+		p.one_shot = false
+		p.explosiveness = 0.0
+		p.lifetime = 3.2
+		p.amount = maxi(2, int(ceil(por_segundo * 3.2)))
+		p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+		p.direction = Vector2.UP
+		p.spread = 35.0
+		p.initial_velocity_min = 20.0
+		p.initial_velocity_max = 70.0
+		p.gravity = Vector2(0.0, -18.0)
+		p.damping_min = 0.0
+		p.damping_max = 6.0
+		_brisas[nome] = p
+	p.position = area.get_center()
+	p.emission_rect_extents = area.size * 0.5
+	p.color = cor
+	if ligada and not p.emitting:
+		p.visible = true
+		p.emitting = true
+	elif not ligada:
+		p.emitting = false

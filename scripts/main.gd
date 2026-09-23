@@ -551,9 +551,6 @@ const ESPERA_DA_LISTA := 2.0
 ## a placa ESTÁ conectada, quem ainda não sabe é o jogo.
 const ESPERA_DA_LISTA_NA_CENTRAL := 0.6
 var _lista_pedida_em := -99.0
-var _thread_portas: Thread = null
-var _portas_do_fundo := PackedStringArray()
-var _mutex_portas := Mutex.new()
 var _lista_ja_veio := false
 ## A primeira lista não tem com o que ser comparada: sem esta bandeira,
 ## toda porta que o PC já tinha seria anunciada como recém-chegada no
@@ -629,7 +626,6 @@ var _proxima_escolha_de_caminho := 0.0
 ## Amarrá-la a `_varreduras`, que zera a cada troca de caminho, faria a
 ## troca de caminho DESLIGAR a varredura cega justamente na máquina onde
 ## as duas são necessárias.
-var _cega_liberada := false
 ## ESTE CAMINHO JÁ ENTREGOU UMA LINHA DE VERDADE NESTA MÁQUINA?
 ##
 ## Uma linha impede troca por simples demora de descoberta. Quedas
@@ -812,6 +808,8 @@ func _ready() -> void:
 		fonte_texto = load("res://assets/fonts/SairaCondensed-ExtraBold.ttf")
 	letreiro_do_nome.fonte = fonte
 	fx.vigia = desempenho
+	fx.montar(self)
+	fx.aquecer()
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
@@ -913,10 +911,11 @@ func _montar_arena() -> void:
 	arena.qualidade = desempenho.qualidade
 	if arena.instalar():
 		arena.preparar()
-		if not arena.modelo_avancado():
-			push_warning("Arena: o lutador subiu sem todas as nove ações.")
+		# Compila shaders e sobe as texturas agora, fora da vista, e não
+		# no primeiro soco.
+		arena.aquecer()
 	else:
-		push_warning("Arena: o lutador não pôde ser montado.")
+		push_warning("Arena: o lutador subiu sem todas as poses.")
 
 ## A ARENA SÓ EXISTE NAS TELAS EM QUE APARECE.
 ##
@@ -937,9 +936,6 @@ func _exit_tree() -> void:
 	# A THREAD DA ENUMERAÇÃO FECHA PRIMEIRO, e antes de o `link` sumir:
 	# ela está falando com ele. Aqui — e só aqui — vale esperar, porque
 	# não há mais quadro para estragar.
-	if _thread_portas != null:
-		_thread_portas.wait_to_finish()
-		_thread_portas = null
 	if link != null:
 		link.close_port()
 		# A ponte por processo tem um ajudante do lado de fora: fechar a
@@ -1073,11 +1069,18 @@ func _process(delta: float) -> void:
 		arena.ligar(_arena_no_ar())
 		arena.avancar(passo)
 	_socorro_da_camera(passo)
+	if camera_service != null:
+		camera_service.definir_ritmo(_ritmo_da_camera())
 	_laco_de_atracao(passo)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(passo * 7.0, 0.0, 1.0))
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
 		zoom_impacto = 1.0
 	fx.atualizar(passo)
+	# Poeira dourada subindo do rodapé, só na tela de espera.
+	fx.brisa(
+		"abertura", Rect2(120.0, TELA.y + 10.0, 840.0, 40.0), Color(Paleta.AMBAR, 0.30), 4.0,
+		state == GameDef.State.IDLE and not intro_active and not central_aberta
+	)
 	# O FUNDO ANDA NO RELÓGIO DO JOGO, e não num relógio próprio.
 	#
 	# Ele tinha o seu `_process`, com a sua conta de delta e o seu teto.
@@ -1135,6 +1138,14 @@ func _process(delta: float) -> void:
 	_poll_serial(0.0)
 	queue_redraw()
 
+## Milissegundos entre quadros da webcam, conforme o que está na tela.
+func _ritmo_da_camera() -> int:
+	if central_aberta or state == GameDef.State.COUNTDOWN:
+		return 90
+	if state == GameDef.State.IDLE:
+		return 700
+	return 2500
+
 func _processar_abertura(delta: float) -> void:
 	if intro_active:
 		var antes := intro_time
@@ -1174,11 +1185,6 @@ func _processar_abertura(delta: float) -> void:
 		aviso_de_credito += delta
 		if aviso_de_credito > 2.6:
 			aviso_de_credito = -1.0
-	if randf() < delta * 4.0:
-		fx.poeira(
-			Vector2(randf_range(120.0, 960.0), TELA.y + 40.0),
-			1, Color(Paleta.AMBAR, 0.30), 120.0
-		)
 
 func _processar_contagem(delta: float) -> void:
 	# A POSE INTEIRA ACONTECE SOBRE IMAGEM AO VIVO — OU NÃO ACONTECE.
@@ -1541,11 +1547,11 @@ func _marcar_atos_do_ranking() -> void:
 	if celebracao.is_empty():
 		return
 	var t := _tempo_do_ranking()
-	# A LINHA BATE NO LUGAR: som seco e um tranco curto na tela.
+	# A LINHA ACENDE: só o som. Tremer a tela aqui sacudia a tabela
+	# inteira justamente quando a pessoa tenta ler a posição dela.
 	if not _ato_assentou and t >= ATO_ANUNCIO + ATO_TABELA:
 		_ato_assentou = true
-		sons.play("hit", -6.0)
-		tremor = maxf(tremor, float(celebracao["tremor"]) * 0.55)
+		sons.play("hit", -8.0)
 	# E SÓ ENTÃO O CONFETE. Durante o movimento ele vira sujeira por cima
 	# da informação; depois dele, vira festa.
 	if not _ato_festejou and t >= ATO_ANUNCIO + ATO_TABELA + ATO_ASSENTA:
@@ -1558,7 +1564,8 @@ func _marcar_atos_do_ranking() -> void:
 		_festa_ranking_decorrido = 0.0
 		_festa_ranking_proximo = 0.0
 		_festa_ranking_canhao = 0
-		tremor = maxf(tremor, float(celebracao["tremor"]))
+		# Um tranco leve só: a festa é o confete, não a tela chacoalhando.
+		tremor = maxf(tremor, float(celebracao["tremor"]) * 0.25)
 
 func _manter_festa(delta: float) -> void:
 	_manter_festa_do_ranking(delta)
@@ -1574,7 +1581,8 @@ func _manter_festa(delta: float) -> void:
 	# mais importante da partida acontecia no silêncio visual que sobrava.
 	# Agora acompanha o veredito até o fim, e os fogos entram no intervalo
 	# do nível, que é mais espaçado do que era.
-	if intervalo <= 0.0 or verdict_time >= 9.0 or verdict_time < proximo_fogo:
+	# Os fogos param quando a tabela entra: nada explode por cima dela.
+	if intervalo <= 0.0 or verdict_time >= 9.0 or verdict_time < proximo_fogo or _tabela_no_ar():
 		return
 	proximo_fogo = verdict_time + intervalo
 	ImpactDirector.festa(fx, _alvo(), nivel, CORES_FESTA)
@@ -2361,9 +2369,9 @@ func _resultado_da_calibracao() -> void:
 # ======================================================================
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
 # ======================================================================
-func _iniciar_serial(evitar := "") -> void:
+func _iniciar_serial() -> void:
 	_soltar_link()
-	link = SerialLink.create_best(evitar, caminho_serial_conhecido)
+	link = SerialLink.create_best()
 	link.line_received.connect(_on_serial_line)
 	link.opened.connect(_on_serial_opened)
 	link.closed.connect(_on_serial_closed)
@@ -2381,9 +2389,6 @@ func _iniciar_serial(evitar := "") -> void:
 	_falhas_da_porta_fixa = 0
 	_porta_confirmada = false
 	_caminho_provado = false
-	# `_cega_liberada` NÃO é zerada aqui de propósito: ver o comentário
-	# dela. O que a máquina descobriu sobre si mesma não se esquece na
-	# troca de caminho.
 	_fila_de_portas = PackedStringArray()
 	_caminho_desde = animation_time
 	_proxima_escolha_de_caminho = animation_time + SEGUNDOS_ATE_TROCAR_DE_CAMINHO
@@ -2588,109 +2593,21 @@ func _fila_de_tentativas() -> PackedStringArray:
 	# na hora e sai da frente em fração de segundo, então a varredura
 	# inteira custa poucos segundos — e ao fim dela não sobrou porta
 	# nenhuma onde a placa pudesse estar escondida.
-	if _cega_liberada:
-		for porta in _portas_cegas():
-			if not fila.has(porta):
-				fila.append(porta)
 	return fila
-
-## OS NOMES QUE O SISTEMA USA, mesmo quando ele não os anuncia.
-##
-## No Windows são COM1 a COM64: acima de COM9 o nome de verdade precisa
-## do prefixo `\\.\`, e é o próprio SerialPort do .NET que o põe, então
-## aqui vai o nome simples. No Linux são os dois nomes que um Arduino
-## recebe (ttyACM para os que têm USB nativo, ttyUSB para os clones com
-## CH340/FTDI). No macOS o nome carrega um sufixo do fabricante que não
-## se adivinha — lá a enumeração por glob do ajudante é a única saída, e
-## ela funciona.
-func _portas_cegas() -> PackedStringArray:
-	var cegas := PackedStringArray()
-	match OS.get_name():
-		"Windows":
-			for i in range(1, 65):
-				cegas.append("COM%d" % i)
-		"Linux", "FreeBSD", "NetBSD", "OpenBSD", "BSD":
-			for i in range(0, 8):
-				cegas.append("/dev/ttyACM%d" % i)
-			for i in range(0, 8):
-				cegas.append("/dev/ttyUSB%d" % i)
-	return cegas
 
 ## DÁ PARA PROCURAR AGORA SEM ATRAPALHAR QUEM ESTÁ JOGANDO?
 ##
 ## Só não dá enquanto o golpe está no ar — do 3-2-1 até o veredito sair.
 ## Ver o comentário de `TETO_DA_ESPERA_DO_SOCO`: a pausa é curta, tem
 ## teto, e nunca vira desistência.
-## Manda a thread enumerar, se já passou o tempo e não há outra correndo.
+## Pede a lista de portas. No Android ela vem do cache do plugin (a
+## enumeração USB roda numa thread de lá), então não custa nada aqui.
 func _pedir_a_lista() -> void:
-	# A EXTENSÃO NATIVA NÃO PODE SER CHAMADA DE UMA THREAD SECUNDÁRIA.
-	#
-	# `GdSerialManager` também recebe `poll_events()` na thread principal.
-	# Enumerar portas simultaneamente em `_listar_no_fundo` entrega o mesmo
-	# objeto nativo a duas threads. No Windows, quando não existe Arduino (e
-	# principalmente quando não existe porta COM alguma), essa corrida pode
-	# abortar a extensão e fechar o processo inteiro, sem dar ao GDScript a
-	# chance de mostrar um erro.
-	#
-	# A lista nativa já foi obtida uma vez, com segurança, na thread principal
-	# em `_tentar_conectar`. Se ela veio vazia, a varredura cega tenta COM1 a
-	# COM64 e encontra uma placa conectada depois. Portanto não perdemos a
-	# reconexão automática: apenas deixamos de repetir a enumeração insegura.
-	#
-	# A ponte por processo não compartilha um objeto nativo e continua
-	# enumerando no fundo, como antes.
-	#
-	# MAS "NÃO NA THREAD" VIROU "NUNCA MAIS", E ISSO ERA DEMAIS.
-	#
-	# O que a corrida quebrava era chamar `list_ports()` numa thread
-	# secundária ENQUANTO a principal chamava `poll_events()` no mesmo
-	# objeto nativo. A conclusão certa é não usar thread; a que ficou no
-	# código foi não enumerar. Com isso, no caminho nativo — que é o
-	# normal no Windows — a lista de portas era pedida UMA vez, no
-	# arranque, e nunca mais. Espetar o Arduino com o jogo aberto não
-	# mudava nada: o jogo não tinha como saber que uma porta nova
-	# existia, e só a encontrava quando a varredura cega passasse por
-	# cima dela, dezenas de segundos depois. É exatamente o "fica
-	# DESCONECTADO até que uma hora conecta".
-	#
-	# Aqui a enumeração volta, na THREAD PRINCIPAL, entre dois `poll()`.
-	# Não há duas threads no mesmo objeto, que era a causa real. É a
-	# mesma chamada que `_tentar_conectar` já fazia com segurança na
-	# primeira volta.
-	if link != null and link.nome_do_caminho() in [
-		SerialLink.CAMINHO_NATIVO, SerialLink.CAMINHO_ANDROID_USB
-	]:
-		if link.available() and animation_time - _lista_pedida_em >= _espera_da_lista():
-			_adotar_lista(link.list_ports())
+	if link == null or not link.available():
 		return
-	if _thread_portas != null or link == null or not link.available():
-		return
-	if animation_time - _lista_pedida_em < _espera_da_lista():
-		return
-	_thread_portas = Thread.new()
-	# O `link` vai AMARRADO na chamada. Se o jogo trocar de caminho no
-	# meio da enumeração, a thread continua falando com o objeto que ela
-	# recebeu, e não com um que deixou de existir.
-	_thread_portas.start(_listar_no_fundo.bind(link))
+	if animation_time - _lista_pedida_em >= _espera_da_lista():
+		_adotar_lista(link.list_ports())
 
-func _listar_no_fundo(alvo: SerialLink) -> void:
-	var achadas := alvo.list_ports()
-	_mutex_portas.lock()
-	_portas_do_fundo = achadas
-	_mutex_portas.unlock()
-
-## Recolhe o que a thread achou. Só quando ela já terminou: esperar aqui
-## seria devolver ao jogo exatamente a pausa que a thread existe para
-## tirar dele.
-func _recolher_a_lista() -> void:
-	if _thread_portas == null or _thread_portas.is_alive():
-		return
-	_thread_portas.wait_to_finish()
-	_thread_portas = null
-	_mutex_portas.lock()
-	var achadas := _portas_do_fundo.duplicate()
-	_mutex_portas.unlock()
-	_adotar_lista(achadas)
 
 ## DE QUANTO EM QUANTO TEMPO SE OLHA PARA A LISTA DE PORTAS.
 func _espera_da_lista() -> float:
@@ -2817,7 +2734,6 @@ func _tentar_conectar() -> void:
 		_varreduras += 1
 		# Sem porta nenhuma à vista já na primeira busca, a enumeração
 		# desta máquina não está servindo: solta a varredura cega agora.
-		_cega_liberada = true
 		serial_status = "PROCURANDO ARDUINO… (%s, busca %d, nenhuma porta à vista)" % [
 			link.descricao(), _varreduras
 		]
@@ -2829,9 +2745,6 @@ func _tentar_conectar() -> void:
 	if _porta_da_vez >= _fila_de_portas.size():
 		_porta_da_vez = 0
 		_varreduras += 1
-		# Uma volta inteira sem achar: da próxima vez a fila leva também
-		# as portas que ninguém anunciou. Ver `_portas_cegas`.
-		_cega_liberada = true
 		_fila_de_portas = _fila_de_tentativas()
 	var porta := _fila_de_portas[_porta_da_vez]
 	_porta_da_vez += 1
@@ -2846,7 +2759,7 @@ func _tentar_conectar() -> void:
 		serial_status = "ABRINDO %s — PORTA RECÉM-CONECTADA" % porta
 	else:
 		serial_status = "CONECTANDO %s%s (%d de %d, busca %d)" % [
-			porta, " ✓" if marcada else "",
+			porta, " •" if marcada else "",
 			_porta_da_vez, _fila_de_portas.size(), _varreduras + 1
 		]
 	_porta_confirmada = false
@@ -2939,12 +2852,6 @@ func _poll_serial(_delta: float) -> void:
 	if not link.available():
 		_sem_caminho_ate_a_placa()
 		return
-	if _vigiar_o_caminho():
-		# Trocou de caminho: o `link` daqui para baixo já é outro, e ele
-		# acabou de começar a própria busca. Continuar interrogando o
-		# recém-nascido no mesmo quadro só produziria uma desistência
-		# imediata em cima de uma porta que ninguém chegou a abrir.
-		return
 	# NA CENTRAL, A LISTA É VIGIADA MESMO COM UMA PORTA JÁ ABERTA.
 	#
 	# Abaixo, a lista só é pedida no ramo em que NENHUMA porta está
@@ -2955,11 +2862,9 @@ func _poll_serial(_delta: float) -> void:
 	# dizendo que não havia nada. Só enquanto a placa não respondeu: com
 	# a placa falando, mexer na lista não serve para nada.
 	if central_aberta and not placa_respondeu:
-		_recolher_a_lista()
 		_pedir_a_lista()
 	if not link.is_open():
-		_recolher_a_lista()
-		if _thread_portas == null and animation_time >= proxima_tentativa and _hora_de_procurar():
+		if animation_time >= proxima_tentativa and _hora_de_procurar():
 			_tentar_conectar()
 		return
 	if not _porta_confirmada and animation_time - _porta_pedida_em > ESPERA_DA_CONFIRMACAO:
@@ -3016,102 +2921,21 @@ func _poll_serial(_delta: float) -> void:
 		serial_status = recado
 		return
 
-## SEM CAMINHO AGORA NÃO É SEM CAMINHO PARA SEMPRE.
-##
-## A ponte por processo responde `available() == false` enquanto está
-## ressuscitando o ajudante, e isso é normal e passa em segundos. O que
-## não passa sozinho é o caso em que o caminho escolhido no arranque não
-## serve nesta máquina. Passado o prazo, o jogo REFAZ a escolha — e sem o
-## caminho que acabou de falhar.
+## Sem plugin USB (APK gerado sem o addon, ou fora do Android): diz o
+## motivo e tenta montar o caminho de novo a cada tanto.
 func _sem_caminho_ate_a_placa() -> void:
 	porta_atual = ""
 	_porta_confirmada = false
+	serial_status = "SEM CAMINHO ATÉ O ARDUINO"
 	var motivo := link.motivo_da_falta()
-	# NÃO SE TROCA UM CAMINHO QUE ESTÁ SE LEVANTANDO SOZINHO.
-	#
-	# Esta é a outra metade do laço "PowerShell, depois nenhum, para
-	# sempre". A ponte ressuscita o ajudante dentro do `poll()`, com
-	# espera que dobra a cada fracasso — e trocar de caminho DERRUBA essa
-	# ponte no meio da recuperação e monta outra do zero, que recomeça a
-	# mesma espera. O supervisor que existe para salvar a máquina era o
-	# que a impedia de se salvar.
-	#
-	# E, num PC sem a extensão nativa, não há nem para onde trocar: a
-	# troca devolve a mesma ponte, com o relógio zerado. Puro atrito.
-	#
-	# Enquanto o backend disser que ainda vai tentar, o jogo espera. A
-	# frase na tela diz o que está acontecendo e, agora, o que o ajudante
-	# respondeu antes de cair.
-	if link.pode_insistir():
-		serial_status = "SUBINDO A PONTE ATÉ O ARDUINO…"
-		if not motivo.is_empty():
-			serial_status += " (%s)" % motivo
-		proxima_tentativa = animation_time + 1.0
-		# Se a DLL nativa existe, uma ponte que nem consegue se apresentar
-		# não pode monopolizar a máquina para sempre. Damos o prazo inteiro
-		# de recuperação e então experimentamos o caminho já disponível.
-		if ClassDB.class_exists(&"GdSerialManager") \
-				and animation_time >= _proxima_escolha_de_caminho:
-			_trocar_de_caminho("a ponte não conseguiu iniciar")
-		return
-	serial_status = "SEM CAMINHO ATÉ O ARDUINO — PROCURANDO OUTRO…"
 	if not motivo.is_empty():
 		serial_status += " (%s)" % motivo
-	if animation_time < _proxima_escolha_de_caminho:
-		return
-	_trocar_de_caminho("nenhum caminho respondeu")
-
-## O CAMINHO QUE NÃO ACHA NADA TAMBÉM TEM DE SER TROCADO — e é isto que
-## faz o jogo funcionar em PC que não é o de quem o escreveu.
-##
-## A extensão nativa pode CARREGAR e não servir. No Windows ela depende do
-## runtime do Visual C++ (VCRUNTIME140.dll), que não vem numa instalação
-## limpa: onde ele falta, o .dll nem entra e a ponte assume — esse caso
-## conserta-se sozinho. O caso ruim é o do meio: a extensão entra, diz que
-## está viva, e nunca enumera porta nenhuma. Aí o jogo antigo ficava
-## eternamente em "PROCURANDO ARDUINO…" com o outro caminho ali, do lado,
-## funcionando, e ninguém para chamá-lo — porque a escolha do caminho era
-## feita uma vez, no arranque, e era definitiva.
-##
-## Agora não é. Tanto tempo sem uma única linha válida e o jogo pede o
-## OUTRO caminho. Se o outro também não der, ele volta para este. A
-## máquina acaba caindo no que presta nela, sozinha.
-func _vigiar_o_caminho() -> bool:
-	# No Android existe um unico backend. Troca-lo recriaria exatamente o
-	# mesmo plugin e nao ajudaria a autorizacao ou a reconexao USB.
-	if link.nome_do_caminho() == SerialLink.CAMINHO_ANDROID_USB:
-		return false
-	# Do not destroy a recovering bridge just to recreate that same bridge.
-	if link.nome_do_caminho() == SerialLink.CAMINHO_PONTE and not ClassDB.class_exists(&"GdSerialManager"):
-		return false
-	if _caminho_provado:
-		# Já entregou linha nesta máquina: não se troca só por demora. O
-		# disjuntor de quedas ainda pode revogar esta prova.
-		return false
-	if sensor_presente or ultimo_sinal_ms >= 0:
-		# Está trabalhando: o relógio da desconfiança não corre.
-		_caminho_desde = animation_time
-		return false
-	if animation_time - _caminho_desde < SEGUNDOS_ATE_TROCAR_DE_CAMINHO:
-		return false
-	# TROCAR DE CAMINHO NO MEIO DA VARREDURA SERIA DESISTIR SEM PROCURAR.
-	#
-	# A troca zera a fila e recomeça do princípio. Feita antes de a
-	# varredura fechar uma volta — e uma volta com a lista cega tem trinta
-	# e tantas portas —, ela cortaria a busca sempre no mesmo ponto, e as
-	# portas do fim da fila nunca seriam tentadas por caminho nenhum. O
-	# caminho só é condenado depois de ter tido a chance inteira.
-	if _varreduras < 1:
-		return false
-	_trocar_de_caminho("%s não achou a placa em %d s" % [
-		link.descricao(), int(SEGUNDOS_ATE_TROCAR_DE_CAMINHO)
-	])
-	return true
+	if animation_time >= _proxima_escolha_de_caminho:
+		_trocar_de_caminho("nenhum caminho respondeu")
 
 func _trocar_de_caminho(motivo: String) -> void:
-	var anterior := link.nome_do_caminho() if link != null else ""
 	_trocas_de_caminho += 1
-	_iniciar_serial(anterior)
+	_iniciar_serial()
 	var agora := link.descricao() if link != null else "nenhum"
 	serial_status = "TROCANDO DE CAMINHO — %s → %s" % [motivo, agora]
 
@@ -3195,9 +3019,7 @@ func _on_serial_line(line: String) -> void:
 	if msg.is_empty() or str(msg.get("type", "")) == "":
 		return
 	ultimo_sinal_ms = Time.get_ticks_msec()
-	# UMA LINHA VÁLIDA É A PROVA DE QUE ESTE CAMINHO PRESTA. Zera o
-	# relógio da desconfiança: `_vigiar_o_caminho` não pode trocar o
-	# caminho de uma máquina que está funcionando.
+	# Uma linha válida prova que este caminho funciona.
 	_caminho_desde = animation_time
 	_caminho_provado = true
 	# QUALQUER LINHA VÁLIDA JÁ PROVA A PORTA — não só o `READY`.
@@ -3243,7 +3065,14 @@ func _on_serial_line(line: String) -> void:
 			# mudou entre PUNCH_OPTICAL, PUNCH_MH e PUNCH_LM393.
 			firmware_optico_identificado = dispositivo in ["PUNCH_OPTICAL", "PUNCH_MH", "PUNCH_LM393"] \
 				or "OPTICAL" in dispositivo or "LM393" in dispositivo
-			if firmware_optico_identificado:
+			# O firmware responde READY também a cada PING. Só o PRIMEIRO
+			# READY põe a máquina em "calibrando"; os seguintes só marcam a
+			# hora, e viram religamento se um CALIBRATING vier logo atrás
+			# (ver "CALIBRATING"). Antes, cada PING deixava o jogo preso em
+			# "calibrando" até a próxima calibração, que nunca vinha.
+			if firmware_optico_identificado and ja_identificado:
+				_ready_repetido_em = animation_time
+			elif firmware_optico_identificado:
 				porta_arduino_identificada = porta_atual
 				placa_calibrando = true
 				progresso_calibracao = 0
@@ -3292,6 +3121,12 @@ func _on_serial_line(line: String) -> void:
 		"CALIBRATING":
 			if not firmware_optico_identificado:
 				return
+			# READY seguido de calibração = a placa religou sozinha (queda
+			# de energia, reset). Ela voltou com a configuração de fábrica:
+			# a nossa é reenviada assim que a calibração terminar.
+			if animation_time - _ready_repetido_em < 1.5 and animation_time - _config_enviada_em > 3.0:
+				_reenviar_config = true
+			_ready_repetido_em = -99.0
 			placa_calibrando = true
 			progresso_calibracao = int(msg["percent"])
 			mensagem_sensor_publica = "MANTENHA O ALVO PARADO"
@@ -3305,6 +3140,9 @@ func _on_serial_line(line: String) -> void:
 			placa_calibrando = false
 			progresso_calibracao = 100
 			mensagem_sensor_publica = ""
+			if _reenviar_config:
+				_reenviar_config = false
+				_enviar_config()
 			_sensor_apareceu()
 			serial_status = "CONECTADO %s" % porta_atual
 			if state == GameDef.State.ARMED and not central_aberta:
@@ -3594,7 +3432,12 @@ func _mandar_fitas(fracao: float, agora := true) -> void:
 	_fitas_ultimo = f
 	link.send_line(ArduinoProtocol.build_leds(f))
 
+var _ready_repetido_em := -99.0
+var _config_enviada_em := -99.0
+var _reenviar_config := false
+
 func _enviar_config() -> void:
+	_config_enviada_em = animation_time
 	if link != null and link.is_open():
 		link.send_line(ArduinoProtocol.build_config(
 			sensor_eixo, sensor_raio, hit_min_speed, sensor_pulso_ms, hit_max_speed
@@ -4114,9 +3957,6 @@ func _ajustar(chave: String, direcao: int) -> void:
 ## enumeração é confiável e a lista real basta.
 func _opcoes_de_porta() -> PackedStringArray:
 	var opcoes := PackedStringArray(["AUTO"])
-	if OS.get_name() == "Windows":
-		for i in range(1, 13):
-			opcoes.append("COM%d" % i)
 	for porta in portas_visiveis:
 		if not opcoes.has(porta):
 			opcoes.append(porta)
@@ -4316,6 +4156,9 @@ func _draw() -> void:
 	var origem := _deslocamento + ALVO_DO_SOCO - ALVO_DO_SOCO * zoom_impacto
 	if tremor > 0.1 or zoom_impacto != 1.0:
 		draw_set_transform(origem, 0.0, escala)
+		fx.seguir(origem, escala)
+	else:
+		fx.seguir(Vector2.ZERO, Vector2.ONE)
 
 	if state == GameDef.State.IDLE:
 		if intro_active:
@@ -4418,7 +4261,7 @@ func _draw_transicao() -> void:
 func _draw_clarao() -> void:
 	if clarao <= 0.01:
 		return
-	draw_rect(Rect2(Vector2.ZERO, TELA), Color(Paleta.LUZ, clarao * 0.70))
+	draw_rect(Rect2(Vector2.ZERO, TELA), Color(Paleta.LUZ, clarao * 0.45))
 	var borda := 150.0 * clarao
 	var escuro := Color(Paleta.MARINHO, clarao * 0.30)
 	draw_rect(Rect2(0.0, 0.0, TELA.x, borda), escuro)
@@ -5064,7 +4907,7 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 				# A faixa MELHOR mora ACIMA do cartão: dentro dele ela
 				# brigaria com o rótulo do soco por 32 pixels de altura.
 				_texto_cabendo(
-					"★ MELHOR", caixa.position.y - 12.0,
+					"MELHOR", caixa.position.y - 12.0,
 					CORPO_APOIO, cor, dentro, esq
 				)
 		else:
@@ -5149,218 +4992,134 @@ func _cor_da_posicao(posicao: int) -> Color:
 			return Color("c1783a")
 	return Paleta.CIANO
 
-## Resultado encerra em uma cerimônia: a lista se move até a colocação
-## conquistada, sem reduzir vinte fotos a miniaturas ilegíveis.
-## A ENTRADA NO RANKING, EM QUATRO ATOS.
+## A TABELA DE RECORDES, EM TRÊS ATOS.
 ##
-## Antes era um movimento só: a tabela chegava deslizando e, no meio
-## dela, uma linha vinha destacada. Quem entrou no Top 20 descobria isso
-## lendo — e ler não é comemorar. O momento pelo qual a pessoa jogou
-## passava sem acontecer.
+##   1. O ANÚNCIO (só para quem entrou): o selo com a posição, sozinho.
+##   2. A TABELA: as linhas entram em cascata curta, deslizando pouco e
+##      sem quique — uma montagem rápida, e não vinte animações.
+##   3. O DESTAQUE: a linha de quem jogou acende no próprio lugar (não
+##      cai por cima das outras) e o confete começa, POR TRÁS dos cartões.
 ##
-## Agora há uma ORDEM, e cada ato faz uma coisa só:
-##
-##   1. O ANÚNCIO. A tela inteira para no aviso. Nada de tabela ainda:
-##      primeiro a notícia, depois o contexto.
-##   2. A TABELA CHEGA. As linhas entram e a lista rola até a vizinhança
-##      da posição conquistada.
-##   3. A LINHA ASSENTA. O cartão de quem jogou desce no lugar dele e
-##      bate — é o instante em que o nome ENTRA na lista.
-##   4. O CONFETE. Depois, e não antes: confete durante o movimento vira
-##      sujeira por cima da informação; depois dele, vira festa.
-##
-## Quem NÃO entrou no Top 20 pula os atos 1, 3 e 4 e vai direto à tabela.
-## Comemorar o que não aconteceu é o jeito mais rápido de a máquina
-## perder a credibilidade.
-## O RITMO DOS ATOS — QUE JÁ FOI RÁPIDO DEMAIS E AÍ FICOU LENTO DEMAIS.
-##
-## Primeiro foram 0,90 / 0,85 / 0,55: dois segundos e pouco para
-## anunciar, montar a tabela e assentar a linha. Passava rápido demais
-## para ser vivido, e quem entrava no Top 20 mal via acontecer.
-##
-## A correção foi generosa demais na outra direção: 1,45 / 1,20 / 0,80,
-## mais 2,5 s de espera antes de tudo. São SEIS SEGUNDOS entre o veredito
-## e a linha assentando no lugar — com o número já revelado, o nível já
-## anunciado e nada mais em jogo. Essa é a parte da tela em que quem
-## jogou já sabe o resultado e está esperando a máquina terminar de
-## dizê-lo, e foi ela que chegou como "a animação do ranking está
-## devagar".
-##
-## Estes tempos são o meio: pouco mais de três segundos do veredito até
-## a linha no lugar. Cada ato continua sendo um ato — o anúncio ainda
-## para a tela, a tabela ainda chega, a linha ainda cai e bate —, mas
-## nenhum deles espera por si mesmo. A comemoração que vem depois
-## (confete, torcida) não encolheu: essa a pessoa quer que dure.
-## O LEIAUTE DA LISTA, num lugar só.
-##
-## Estavam espalhadas pelo desenho como números soltos — 430, 164, 380,
-## 1150 —, e mexer em qualquer uma exigia caçar as outras. Uma linha mais
-## alta sem o recorte acompanhando é a linha escapando para cima do
-## título, que foi um defeito real desta tela.
+## Nada é desenhado por cima da tabela depois que ela aparece: os fogos
+## do resultado param (ver `_manter_festa`) e o confete mora na camada
+## de fundo dos efeitos.
 const LINHA_ALTURA := 126.0
 const LISTA_TOPO := 336.0
-## Quantas linhas inteiras cabem na janela. Sai do recorte, e não de um
-## número anotado à parte que envelhece quando alguém mexe na altura.
 const LINHAS_VISIVEIS := 8
-## SÓ LINHA INTEIRA APARECE.
-##
-## O recorte deixava passar uma linha que começasse até uma altura ACIMA
-## do topo, na ideia de mostrar a lista "cortada" na borda. Sem um
-## recorte de verdade no desenho, o que acontecia era outra coisa: com a
-## lista rolada, o primeiro cartão subia por cima da faixa da colocação e
-## do fio do título, e escondia justamente o aviso de que a pessoa tinha
-## entrado. Uma linha só entra quando cabe inteira.
 const LISTA_RECORTE_TOPO := 330.0
-## Sete linhas cheias. A oitava encostava no "SEU SOCO" do rodapé — e
-## texto por cima de cartão é o defeito mais visível que esta tela pode
-## ter, porque é a tela que sai fotografada no celular.
 const LISTA_RECORTE_BASE := 1350.0
-
-## A CASCATA. Quanto uma linha espera depois da anterior, e quanto dura a
-## entrada de cada uma.
-##
-## São números pequenos de propósito: 45 ms entre linhas e 180 ms de
-## entrada dão uma sequência que o olho lê como UMA montagem rápida, e
-## não como vinte animações. Mais lento do que isso vira desfile.
-const LINHA_CASCATA := 0.045
-const LINHA_ENTRADA := 0.18
+const LINHA_CASCATA := 0.035
+const LINHA_ENTRADA := 0.24
+const LINHA_DESLIZE := 36.0
 
 const ATO_ANUNCIO := 0.95
-const ATO_TABELA := 0.68
-const ATO_ASSENTA := 0.45
+const ATO_TABELA := 0.60
+const ATO_ASSENTA := 0.35
 
 func _tempo_do_ranking() -> float:
 	if not ranking_announced or ranking_started_at < 0.0:
 		return 0.0
 	return maxf(0.0, verdict_time - ranking_started_at)
 
+## Saída suave, sem passar do ponto: é o que tira o "tranco" das linhas.
+static func _suave(t: float) -> float:
+	var u := 1.0 - clampf(t, 0.0, 1.0)
+	return 1.0 - u * u * u
+
 func _draw_ranking_reveal() -> void:
 	var t := _tempo_do_ranking()
 	var entrou := posicao_no_ranking > 0
-	# Sem entrada no ranking não há anúncio nem assentamento: a tabela é
-	# a única coisa que essa pessoa tem para ver.
 	var anuncio := ATO_ANUNCIO if entrou else 0.0
 	if entrou and t < anuncio:
 		_ranking_anuncio(t / anuncio)
 		return
 
 	var tabela := t - anuncio
-	var assenta := clampf((tabela - ATO_TABELA) / ATO_ASSENTA, 0.0, 1.0)
-
+	var destaque := clampf((tabela - ATO_TABELA) / ATO_ASSENTA, 0.0, 1.0)
 	var celebracao := RankingCelebration.para(posicao_no_ranking)
 	_ranking_cabecalho(entrou, celebracao, tabela)
 
-	# A JANELA DA LISTA. Ela é rolada para a vizinhança da linha
-	# conquistada — e já CHEGA rolada, sem animar a rolagem. Animar a
-	# lista inteira deslizando é meio segundo em que não dá para ler
-	# nada; é a linha da pessoa que precisa se mexer, não a tabela.
-	# O CAMPEÃO NÃO PODE SUMIR DA TELA À TOA.
-	#
-	# A rolagem punha a linha conquistada sempre na terceira posição
-	# visível — inclusive quando a pessoa tirou o 4º lugar, e aí a lista
-	# começava no 02 e o CAMPEÃO, que é a linha mais importante de uma
-	# tabela de recordes, ficava de fora sem necessidade nenhuma. Pondo a
-	# linha conquistada na QUINTA posição visível, todo mundo do 1º ao 5º
-	# lugar vê a tabela desde o topo, e só quem entrou mais fundo é que
-	# perde o começo — aí não tem jeito, a lista não cabe.
-	var foco := clampi(
-		posicao_no_ranking - 5, 0, maxi(RANKING_TAMANHO - LINHAS_VISIVEIS, 0)
-	)
+	# A janela já chega rolada para a vizinhança da posição conquistada,
+	# com a linha dela na quinta posição visível (do 1º ao 5º lugar a
+	# tabela aparece desde o topo).
+	var foco := clampi(posicao_no_ranking - 5, 0, maxi(RANKING_TAMANHO - LINHAS_VISIVEIS, 0))
 	var offset := float(foco) * LINHA_ALTURA
-
 	for i in range(RANKING_TAMANHO):
 		var y := LISTA_TOPO + float(i) * LINHA_ALTURA - offset
-		if y < LISTA_RECORTE_TOPO or y + LINHA_ALTURA > LISTA_RECORTE_BASE + LINHA_ALTURA:
+		if y < LISTA_RECORTE_TOPO or y + LINHA_ALTURA - 18.0 > LISTA_RECORTE_BASE:
 			continue
-		if y + LINHA_ALTURA - 18.0 > LISTA_RECORTE_BASE:
-			continue
-		var selected := posicao_no_ranking == i + 1
-		# A CASCATA: CADA LINHA TEM O SEU PRÓPRIO RELÓGIO.
-		#
-		# Antes as vinte compartilhavam um `eased` só, então a tabela
-		# inteira deslizava como um bloco — um movimento longo e mole. Com
-		# um atraso por posição e uma entrada curta para cada uma, elas
-		# batem no lugar em sequência, uma depois da outra, rápido. É a
-		# diferença entre uma tela que desliza e uma tela que MONTA.
 		var atraso := float(i - foco) * LINHA_CASCATA
-		var meu := clampf((tabela - atraso) / LINHA_ENTRADA, 0.0, 1.0)
-		if meu <= 0.0:
+		var entrada := clampf((tabela - atraso) / LINHA_ENTRADA, 0.0, 1.0)
+		if entrada <= 0.0:
 			continue
-		if selected:
-			# A linha de quem jogou não entra com as outras: ela espera a
-			# tabela montar e SÓ ENTÃO cai no lugar dela e bate. É esse
-			# atraso que faz a tabela parecer abrir espaço para ela.
-			_ranking_linha_do_jogador(i, y, assenta, celebracao)
-			continue
-		_ranking_linha(i, y, meu, false)
-
+		var do_jogador := posicao_no_ranking == i + 1
+		_ranking_linha(i, y, entrada, do_jogador, destaque if do_jogador else 0.0)
 	_ranking_rodape()
 
-## O cabeçalho da tabela: título, faixa da colocação e a régua de ouro.
+## O cabeçalho: título, faixa da colocação e o fio.
 func _ranking_cabecalho(entrou: bool, celebracao: Dictionary, tabela: float) -> void:
-	var chegada := clampf(tabela / 0.22, 0.0, 1.0)
-	var alto := lerpf(-40.0, 0.0, _passo_com_batida(chegada))
-	_texto_arcade("TOP 20", 206.0 + alto, 104, Paleta.CIANO, LARGURA_UTIL)
-	# Um fio sob o título dá borda à tabela sem gastar uma moldura.
-	draw_rect(Rect2(MARGEM + 40.0, 236.0 + alto, LARGURA_UTIL - 80.0, 3.0), Color(Paleta.CIANO, 0.5))
+	var chegada := _suave(tabela / 0.30)
+	var a := chegada
+	_texto_arcade("TOP 20", 206.0 - (1.0 - chegada) * 16.0, 104, Color(Paleta.CIANO, a), LARGURA_UTIL)
+	draw_rect(Rect2(MARGEM + 40.0, 236.0, LARGURA_UTIL - 80.0, 3.0), Color(Paleta.CIANO, 0.5 * a))
 	if not entrou:
-		_texto_cabendo("TENTE SUPERAR ESSAS MARCAS", 296.0 + alto, 34, Paleta.TINTA_FRACA, LARGURA_UTIL)
+		_texto_cabendo("TENTE SUPERAR ESSAS MARCAS", 296.0, 34, Color(Paleta.TINTA_FRACA, a), LARGURA_UTIL)
 		return
-	# A FAIXA DA COLOCAÇÃO. Um retângulo na cor da classe, com a posição
-	# grande dentro: é o que a pessoa procura na tela quando chega aqui, e
-	# procurar dentro de uma lista de vinte linhas é trabalho demais.
 	var cor: Color = celebracao.get("cor", Paleta.AMBAR)
-	var faixa := Rect2(MARGEM + 150.0, 258.0 + alto, LARGURA_UTIL - 300.0, 56.0)
-	# Fundo ESCURO com a cor no fio e na letra. Tingir o fundo com a cor
-	# a 16% por cima de um cenário vermelho dava um rosa lavado que não
-	# lê de longe — e esta faixa existe justamente para ser lida de longe.
-	_placa(faixa, 12.0, Color("1a0509", 0.92))
-	draw_rect(faixa, Color(cor, 0.85), false, 2.0)
-	draw_rect(Rect2(faixa.position, Vector2(7.0, faixa.size.y)), cor)
+	var faixa := Rect2(MARGEM + 150.0, 258.0, LARGURA_UTIL - 300.0, 56.0)
+	_placa(faixa, 12.0, Color("1a0509", 0.92 * a))
+	draw_rect(faixa, Color(cor, 0.85 * a), false, 2.0)
+	draw_rect(Rect2(faixa.position, Vector2(7.0, faixa.size.y)), Color(cor, a))
 	_texto(
-		str(celebracao.get("subtitulo", "%dº LUGAR" % posicao_no_ranking)),
-		faixa.position.y + 38.0, 30, cor,
+		str(celebracao.get("subtitulo", "POSIÇÃO %d" % posicao_no_ranking)),
+		faixa.position.y + 38.0, 30, Color(cor, a),
 		HORIZONTAL_ALIGNMENT_CENTER, faixa.position.x, faixa.size.x
 	)
 
-## UMA LINHA DA TABELA. `entrada` de 0 a 1 é a animação dela, e só dela.
-func _ranking_linha(i: int, y: float, entrada: float, e_do_jogador: bool) -> void:
+## "23/09 • 14:32" a partir do `created_at` gravado (ISO do sistema).
+static func _data_curta(iso: String) -> String:
+	if iso.length() < 16 or iso[4] != "-":
+		return ""
+	return "%s/%s  •  %s" % [iso.substr(8, 2), iso.substr(5, 2), iso.substr(11, 5)]
+
+## UMA LINHA DA TABELA. `entrada` (0–1) é a chegada dela; `destaque`
+## (0–1) acende a linha de quem acabou de jogar.
+##
+## O texto de cada linha diz algo DE VERDADE sobre a marca: o nível
+## alcançado (na cor do nível) e quando ela foi feita. "JOGADOR" em todas
+## as linhas não dizia nada.
+func _ranking_linha(i: int, y: float, entrada: float, e_do_jogador: bool, destaque := 0.0) -> void:
 	var vazia := i >= ranking.size()
 	var posicao := i + 1
 	var cor := _cor_da_posicao(posicao)
-	var passo := _passo_com_batida(entrada)
-	# Entra pela esquerda e assenta. Nunca pela direita: a pontuação fica
-	# na ponta direita do cartão e sairia da tela durante toda a entrada.
-	var desliza := -(1.0 - passo) * 140.0
-	var tinta := clampf(entrada * 2.4, 0.0, 1.0)
-	var alta := posicao <= 3 and not vazia
-	var card := Rect2(78.0 + desliza, y, 924.0, LINHA_ALTURA - 16.0)
+	var passo := _suave(entrada)
+	var tinta := passo
+	var card := Rect2(78.0 - (1.0 - passo) * LINHA_DESLIZE, y, 924.0, LINHA_ALTURA - 16.0)
 
 	if vazia:
-		_placa(card, 10.0, Color("170509", tinta * 0.9))
+		_placa(card, 10.0, Color("170509", tinta * 0.85))
 		draw_rect(card, Color("3d1019", tinta * 0.8), false, 1.5)
-		_texto("%02d" % posicao, y + 62.0, 34, Color(Paleta.TINTA_LEVE, tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 30.0)
-		_texto("VAGA ABERTA", y + 62.0, 26, Color(Paleta.TINTA_FRACA, tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0)
+		_texto("%02d" % posicao, y + 66.0, 34, Color(Paleta.TINTA_LEVE, tinta), HORIZONTAL_ALIGNMENT_CENTER, card.position.x + 24.0, 82.0)
+		_texto("VAGA ABERTA", y + 64.0, 26, Color(Paleta.TINTA_FRACA, tinta * 0.8), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0)
 		return
 
-	# O CORPO DO CARTÃO. O pódio é mais claro e tem a borda na cor da
-	# medalha; do quarto para baixo todos são iguais, e é essa igualdade
-	# que faz os três primeiros valerem alguma coisa.
-	var fundo := Color("b21029") if e_do_jogador else (Color("3a0d1a") if alta else Color("240810"))
+	var alta := posicao <= 3
+	var nota := RankingStore.score_at(ranking, i)
+	var fundo := Color("3a0d1a") if alta else Color("240810")
+	if e_do_jogador:
+		# A linha de quem jogou ACENDE no lugar: brilho que chega e fica
+		# num tom quente, e um halo que só pulsa uma vez.
+		fundo = fundo.lerp(Color("b21029"), destaque)
+		if destaque > 0.0 and destaque < 1.0:
+			var halo := sin(destaque * PI)
+			_placa(card.grow(6.0 + 10.0 * halo), 16.0, Color(Paleta.AMBAR, 0.16 * halo))
 	_placa(card, 10.0, Color(fundo, tinta))
-	draw_rect(card, Color(cor, tinta * (0.95 if alta or e_do_jogador else 0.45)), false, 3.0 if alta or e_do_jogador else 1.5)
-	# A TARJA NA COR DA POSIÇÃO, na lateral. Custa um retângulo e resolve
-	# a leitura a distância: ouro, prata, bronze e o resto, sem ler nada.
+	var borda := 3.0 if alta or e_do_jogador else 1.5
+	var borda_cor := Paleta.AMBAR if e_do_jogador and destaque > 0.0 else cor
+	draw_rect(card, Color(borda_cor, tinta * (0.95 if alta or e_do_jogador else 0.45)), false, borda)
 	draw_rect(Rect2(card.position, Vector2(8.0, card.size.y)), Color(cor, tinta))
 
-	# A ficha do número, num quadrado próprio. Um número solto no meio de
-	# um cartão some; dentro de uma ficha ele vira o índice da linha.
-	#
-	# NO PÓDIO A FICHA É A MEDALHA: cheia, na cor, com o número escuro
-	# dentro. Fora do pódio ela é um quadrado NEUTRO com o número na cor.
-	# Tingir o quadrado com a cor da posição a 18% parecia econômico e
-	# saía marrom-oliva por cima do cartão vermelho-escuro — uma cor que
-	# não é de ninguém e suja a lista inteira. Cor cheia ou cor nenhuma.
+	# A ficha do número: no pódio é a medalha cheia; abaixo, neutra.
 	var ficha := Rect2(card.position.x + 24.0, y + 14.0, 82.0, 82.0)
 	_placa(ficha, 10.0, Color(cor, tinta) if alta else Color("140309", tinta * 0.92))
 	if not alta:
@@ -5370,116 +5129,71 @@ func _ranking_linha(i: int, y: float, entrada: float, e_do_jogador: bool) -> voi
 		Color(Color("1a0409") if alta else cor, tinta),
 		HORIZONTAL_ALIGNMENT_CENTER, ficha.position.x, ficha.size.x
 	)
-	if alta:
-		Icones.trofeu(self, Vector2(ficha.end.x + 2.0, ficha.position.y + 8.0), 12.0, Color(cor, tinta))
-
 	_draw_player_photo(Rect2(card.position + Vector2(126.0, 14.0), Vector2(82.0, 82.0)), str(ranking[i].get("photo_path", "")), tinta)
+
+	var x_texto := card.position.x + 232.0
+	var nivel := ScoreTier.nome_de(nota)
+	var cor_nivel := Paleta.texto_sobre(fundo, ScoreTier.cor_de(nota))
+	if e_do_jogador:
+		_texto("VOCÊ", y + 50.0, 31, Color(Paleta.CREME, tinta), HORIZONTAL_ALIGNMENT_LEFT, x_texto, 300.0)
+		_texto(nivel, y + 84.0, 20, Color(cor_nivel, tinta), HORIZONTAL_ALIGNMENT_LEFT, x_texto, 320.0)
+	else:
+		_texto(nivel, y + 50.0, 25, Color(cor_nivel, tinta), HORIZONTAL_ALIGNMENT_LEFT, x_texto, 320.0)
+		var quando := _data_curta(str(ranking[i].get("created_at", "")))
+		if not quando.is_empty():
+			_texto(quando, y + 84.0, 20, Color(Paleta.TINTA_LEVE, tinta), HORIZONTAL_ALIGNMENT_LEFT, x_texto, 320.0)
 	_texto(
-		"VOCÊ" if e_do_jogador else ("CAMPEÃO" if posicao == 1 else "JOGADOR"),
-		y + 46.0, 24, Color(Paleta.TINTA_FRACA if not e_do_jogador else Paleta.CREME, tinta),
-		HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0
-	)
-	# O NOME DO NÍVEL, embaixo. Sai da própria nota, então não custa dado
-	# nenhum guardado — e diz mais do que a data: numa lista de números de
-	# quatro dígitos, "NOCAUTE" é o que se lê de longe.
-	var cor_nivel := Paleta.texto_sobre(fundo, ScoreTier.cor_de(RankingStore.score_at(ranking, i)))
-	_texto(
-		ScoreTier.nome_de(RankingStore.score_at(ranking, i)), y + 76.0, 16,
-		Color(cor_nivel, tinta * 0.92),
-		HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 232.0, 320.0
-	)
-	_texto(
-		"%04d" % RankingStore.score_at(ranking, i), y + 78.0,
-		56 if (alta or e_do_jogador) else 48,
+		"%04d" % nota, y + 78.0, 56 if (alta or e_do_jogador) else 48,
 		Color(Paleta.TINTA, tinta), HORIZONTAL_ALIGNMENT_RIGHT,
 		card.position.x, card.size.x - 32.0
 	)
-
-## A LINHA DE QUEM ACABOU DE JOGAR: cai de cima, bate e acende.
-func _ranking_linha_do_jogador(i: int, y: float, assenta: float, celebracao: Dictionary) -> void:
-	var queda := (1.0 - _passo_com_batida(assenta)) * float(celebracao.get("queda", 150.0))
-	# O HALO SÓ NO INSTANTE DA BATIDA, e apagando depressa. Ele existe
-	# para marcar o quadro em que a linha encosta; sustentado, vira
-	# enfeite e some o sentido.
-	var y_final := y
-	if assenta >= 1.0:
-		var brilho := clampf(1.0 - (assenta - 1.0) * 6.0, 0.0, 1.0)
-		if brilho > 0.0:
-			for k in range(3):
-				var atras := Rect2(78.0, y_final, 924.0, LINHA_ALTURA - 16.0).grow(6.0 + float(k) * 12.0)
-				_placa(atras, 14.0, Color(Paleta.AMBAR, (0.12 - float(k) * 0.035) * brilho))
-	_ranking_linha(i, y_final - queda, clampf(assenta * 1.6, 0.0, 1.0), true)
 
 ## O rodapé: a nota da rodada e o convite para jogar de novo.
 func _ranking_rodape() -> void:
 	_rotulo("SEU SOCO", 1428.0, Paleta.TINTA_FRACA)
 	_texto_arcade("%04d" % result_score, 1546.0, 100, ScoreTier.cor_de(result_score), LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
-	# NO RANKING ELA É GRANDE. Esta é a tela que o pessoal fotografa com
-	# o celular para mandar no grupo — é a que mais sai do salão, e a
-	# única em que a marca da casa vale um lugar de destaque.
 	_marca_lateral(1770.0, 0.95, 104.0)
 
-## Chegada com batida: passa do ponto e volta. É o que faz a linha
-## PARECER ter peso ao cair no lugar, em vez de deslizar até parar.
+## Chegada com batida (passa do ponto e volta). Só o selo do anúncio usa.
 func _passo_com_batida(t: float) -> float:
 	if t >= 1.0:
 		return 1.0
 	var p := t - 1.0
-	return p * p * ((2.4 + 1.0) * p + 2.4) + 1.0
+	return p * p * ((1.6 + 1.0) * p + 1.6) + 1.0
 
-## ATO 1 — O ANÚNCIO, sozinho na tela.
-##
-## Um selo que cresce batendo, o número da posição dentro dele e nada
-## mais. A tabela vem depois: notícia primeiro, contexto depois. Um
-## anúncio dividindo a tela com vinte linhas de tabela não é um anúncio.
+## ATO 1 — O ANÚNCIO: o selo com o número da posição, sozinho na tela.
 func _ranking_anuncio(t: float) -> void:
 	var centro := Vector2(540.0, 810.0)
 	var celebracao := RankingCelebration.para(posicao_no_ranking)
 	var abre := clampf(t * 2.2, 0.0, 1.0)
 	var escala := _passo_com_batida(abre)
-	if posicao_no_ranking == 1:
-		escala *= 1.0 + sin(t * PI * 5.0) * (1.0 - abre) * 0.06
 	var raio := float(celebracao.get("raio_selo", 280.0)) * escala
 	var cor_selo: Color = celebracao.get("cor", Paleta.AMBAR)
 
-	# Raios de luz saindo do selo, girando devagar.
 	var quantidade_raios := int(celebracao.get("raios", 12))
 	for i in range(quantidade_raios):
-		var ang := float(i) * TAU / float(quantidade_raios) + animation_time * (0.75 if posicao_no_ranking == 1 else 0.38)
+		var ang := float(i) * TAU / float(quantidade_raios) + animation_time * 0.35
 		var perto := raio * 1.12
 		draw_line(
 			centro + Vector2.from_angle(ang) * perto,
-			centro + Vector2.from_angle(ang) * (perto + lerpf(30.0, 160.0, abre)),
-			Color(cor_selo, 0.30 * abre), 7.0 if posicao_no_ranking <= 3 else 4.0, true
+			centro + Vector2.from_angle(ang) * (perto + lerpf(30.0, 150.0, abre)),
+			Color(cor_selo, 0.26 * abre), 6.0 if posicao_no_ranking <= 3 else 4.0, true
 		)
-	draw_circle(centro, raio, Color(Paleta.VERMELHO, 0.9), true, -1.0, true)
-	Traco.arco(self, centro, raio, cor_selo, 11.0 if posicao_no_ranking == 1 else 7.0)
-	var aneis := int(celebracao.get("aneis", 1))
-	for anel in range(aneis):
-		var proporcao := 0.86 - float(anel) * 0.075
-		Traco.arco(self, centro, raio * proporcao, Color(Paleta.CREME, 0.42 - float(anel) * 0.09), 3.0)
-	# Troféus em órbita tornam a classe da comemoração visível sem
-	# transformar a tela de luta em um céu de estrelas.
-	var emblemas := int(celebracao.get("emblemas", 0))
-	for i in range(emblemas):
-		var angulo := animation_time * float(celebracao.get("giro", 0.4)) + float(i) * TAU / float(emblemas)
-		var ponto := centro + Vector2.from_angle(angulo) * raio * 1.04
-		Icones.trofeu(self, ponto, 22.0 if posicao_no_ranking == 1 else 17.0, cor_selo)
-
+	draw_circle(centro, raio, Color(Paleta.VERMELHO, 0.92), true, -1.0, true)
+	Traco.arco(self, centro, raio, cor_selo, 10.0 if posicao_no_ranking == 1 else 7.0)
+	for anel in range(int(celebracao.get("aneis", 1))):
+		Traco.arco(self, centro, raio * (0.86 - float(anel) * 0.075), Color(Paleta.CREME, 0.40 - float(anel) * 0.09), 3.0)
 	if posicao_no_ranking == 1:
-		Icones.cinturao(self, centro + Vector2(0.0, -raio * 0.57), raio * 0.23, cor_selo)
+		Icones.cinturao(self, centro + Vector2(0.0, -raio * 0.60), raio * 0.21, cor_selo)
 	else:
-		Icones.trofeu(self, centro + Vector2(0.0, -raio * 0.57), raio * 0.16, cor_selo)
-	# Todos os textos usam uma caixa centrada no próprio selo. Antes a
-	# caixa começava em x=230 e terminava fora da tela; por isso palavras
-	# escapavam do círculo e a composição parecia desmontada.
-	var texto_largura := raio * 1.52
-	var texto_x := centro.x - texto_largura * 0.5
-	_texto_arcade(str(celebracao.get("titulo", "VOCÊ ENTROU")), centro.y - raio * 0.20, 62, Paleta.CREME, texto_largura, texto_x)
-	# O número ocupa o centro óptico e não a borda inferior.
-	_texto_arcade("%dº" % posicao_no_ranking, centro.y + raio * 0.25, 126, Paleta.CREME, texto_largura, texto_x)
-	_texto_arcade(str(celebracao.get("subtitulo", "NO TOP 20")), centro.y + raio * 0.56, 43, cor_selo, texto_largura, texto_x)
+		Icones.trofeu(self, centro + Vector2(0.0, -raio * 0.60), raio * 0.15, cor_selo)
+	var largura := raio * 1.52
+	var x := centro.x - largura * 0.5
+	_texto_arcade(str(celebracao.get("titulo", "VOCÊ ENTROU")), centro.y - raio * 0.22, 58, Paleta.CREME, largura, x)
+	# Só o algarismo: o "º" da fonte de cartaz, grande, lia como "12".
+	_texto_arcade("%d" % posicao_no_ranking, centro.y + raio * 0.28, 132, Paleta.CREME, largura, x)
+	_texto_arcade(str(celebracao.get("subtitulo", "TOP 20")), centro.y + raio * 0.58, 36, cor_selo, largura * 0.92, centro.x - largura * 0.46)
 
 # ---------------------------------------------------------------- central
 const CENTRAL_FUNDO := Color("2b0a13")
@@ -5928,33 +5642,9 @@ func _central_camera() -> void:
 		# este anel, os dois minutos são indistinguíveis de um botão que
 		# não fez nada — que foi exatamente a queixa que trouxe até aqui.
 		_carregando(Vector2(540.0, 1010.0), 26.0, Paleta.CIANO)
-	# A LINHA QUE RESPONDE "POR QUE NÃO FUNCIONA NAS OUTRAS MÁQUINAS".
-	#
-	# No Windows o Godot não tem câmera nenhuma por conta própria: tudo
-	# depende da extensão nativa. Sem ela, nem a webcam embutida do
-	# notebook aparece — e a tela dizia "conecte uma câmera USB", que
-	# manda procurar hardware quando o problema é um arquivo que ficou
-	# para trás na cópia. Ver `CameraService`.
-	var nativa_ok := camera_service != null and camera_service.extensao_nativa_presente()
-	if OS.get_name() == "Windows":
-		_cartao(Rect2(110, 930, 860, 56), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
-		if nativa_ok:
-			_texto(
-				"EXTENSÃO NATIVA DA CÂMERA: CARREGADA", 966.0, 17, Paleta.VERDE,
-				HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
-			)
-		else:
-			_texto(
-				"EXTENSÃO NATIVA NÃO CARREGOU — SEM ELA NÃO HÁ CÂMERA NO WINDOWS",
-				960.0, 17, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
-			)
-			_texto(
-				"copie a PASTA inteira do jogo (a DLL fica ao lado do .exe) e instale o VC++ 2015-2022 x64",
-				982.0, 14, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_CENTER, 110.0, 860.0
-			)
 	if medico == null or medico.linhas.is_empty():
 		_texto(
-			"Captura nativa do Windows por Media Foundation — sem Python e sem OpenCV.",
+			"Webcam USB/UVC aberta direto pelo plugin Android do jogo.",
 			1018.0, 15, Paleta.CIANO
 		)
 		# TRINTA E QUATRO PIXELS ENTRE LINHAS, e não vinte e quatro. O
@@ -6128,14 +5818,6 @@ func _central_dados() -> void:
 	# igual. Mas o técnico precisa poder LER isso, porque é a diferença
 	# entre "esta máquina está usando o plano B" e "esta máquina está
 	# quebrada".
-	var nativa_ok := ClassDB.class_exists(&"GdSerialManager")
-	_linha(
-		"extensão nativa: %s" % (
-			"carregada" if nativa_ok
-			else "não carregou — leve gdserial.dll junto do .exe e instale o runtime do Visual C++"
-		),
-		15, Paleta.VERDE if nativa_ok else Paleta.AMBAR
-	)
 	# O ANDAMENTO DA BUSCA, EM NÚMEROS.
 	#
 	# "PROCURANDO ARDUINO…" parado na tela não diz se a máquina está
@@ -6143,9 +5825,8 @@ func _central_dados() -> void:
 	# gabinete. O número da volta subindo é a prova de que a busca está
 	# viva, e é o que se lê ao telefone.
 	_linha(
-		"busca: volta %d  •  porta %d de %d  •  varredura cega %s" % [
+		"busca: volta %d  •  porta %d de %d" % [
 			_varreduras + 1, _porta_da_vez, _fila_de_portas.size(),
-			"LIGADA" if _cega_liberada else "desligada",
 		],
 		15, Paleta.TINTA_LEVE
 	)
