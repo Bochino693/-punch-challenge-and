@@ -180,10 +180,44 @@ func _montar_jogo() -> void:
 	_jogo = cena.instantiate()
 	if "entrada_segurada" in _jogo:
 		_jogo.entrada_segurada = true
-	add_child(_jogo)
+	if OS.get_name() == "Android" or OS.has_environment("PUNCH_SUBVIEWPORT"):
+		_tela_vertical().add_child(_jogo)
+	else:
+		add_child(_jogo)
 	move_child(_camada, -1)
 	_progresso = 0.9
 	_mudar(Fase.AQUECENDO)
+
+
+## A TELA EM PÉ, DESENHADA INTEIRA E SÓ DEPOIS GIRADA.
+##
+## Antes o jogo era desenhado JÁ GIRADO na janela deitada: cada letra era
+## rasterizada de pé e colada de lado, e em tela com escala fracionária
+## (TV Box em 720p, por exemplo) os pixels da letra entortavam — o
+## "chuviscado". Agora o jogo inteiro é desenhado num SubViewport de
+## 1080x1920, sem giro nenhum (as letras saem exatamente como no PC), e o
+## que gira é a IMAGEM pronta, uma vez só, no contêiner. Pixel de letra
+## nunca mais passa por rotação.
+func _tela_vertical() -> SubViewport:
+	var caixa := SubViewportContainer.new()
+	caixa.name = "TelaVertical"
+	caixa.stretch = false
+	caixa.size = TELA
+	caixa.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	if OS.get_name() == "Android":
+		# jogo (x, y) -> tela (y, 1080 - x), igual ao giro antigo.
+		caixa.rotation = -PI * 0.5
+		caixa.position = Vector2(0.0, 1080.0)
+	var vp := SubViewport.new()
+	vp.name = "Jogo"
+	vp.size = Vector2i(int(TELA.x), int(TELA.y))
+	vp.disable_3d = false
+	vp.transparent_bg = false
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp.handle_input_locally = false
+	caixa.add_child(vp)
+	add_child(caixa)
+	return vp
 
 
 func _mudar(nova: Fase) -> void:

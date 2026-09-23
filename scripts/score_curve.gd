@@ -51,17 +51,17 @@ const PONTOS_DE_REFERENCIA := 5000
 ## O CONTRASTE. 1,0 é a resposta neutra depois da ancoragem.
 const CONTRASTE_MIN := 0.70
 const CONTRASTE_MAX := 1.80
-const DEFAULT_CONTRASTE := 1.15
+const DEFAULT_CONTRASTE := 1.35
 
 const DEFAULT_DEAD_ZONE := 0.0
 const DEFAULT_MIN_SPEED := 0.30
-const DEFAULT_MAX_SPEED := 5.20
+const DEFAULT_MAX_SPEED := 7.00
 
 ## Onde o soco de referência cai dentro da faixa, quando ninguém disse.
 ## Um pouco acima do meio: a metade de baixo da faixa é ocupada por
 ## socos de teste, de criança e de quem está só passando, e a de cima
 ## pelos socos que a máquina existe para medir.
-const REFERENCIA_PADRAO := 0.70
+const REFERENCIA_PADRAO := 0.78
 ## Até onde a âncora pode andar. Encostada demais numa ponta, a curva
 ## vira uma parede de um lado e um chão do outro.
 const REFERENCIA_MIN := 0.22

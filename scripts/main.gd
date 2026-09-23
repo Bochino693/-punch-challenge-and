@@ -307,7 +307,8 @@ const ESCALA_DO_SENSOR := 10
 ## máquina saturada no contraste máximo sem ninguém ter pedido, então a
 ## migração descarta os dois e recalcula a partir da faixa medida — que
 ## essa sim continua válida, porque foi medida no gabinete.
-const ESQUEMA_DA_PONTUACAO := 5
+## O 6 endurece: teto 7 m/s, contraste 1,35 e âncora a 78% da faixa.
+const ESQUEMA_DA_PONTUACAO := 6
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 ## O PULSO MÍNIMO EM MILISSEGUNDOS que a placa recebe no CONFIG.
@@ -787,7 +788,9 @@ var logo: Texture2D = null
 func _enter_tree() -> void:
 	# O pai entra antes dos filhos. Definir aqui o retângulo vertical garante
 	# que Fundo, Moldura, Arena e demais Controls já nasçam em 1080x1920.
-	if OS.get_name() == "Android":
+	# Dentro do SubViewport vertical do carregador o giro é feito lá fora,
+	# na imagem pronta — aqui o jogo fica em pé e sem giro.
+	if OS.get_name() == "Android" and not (get_viewport() is SubViewport):
 		anchor_left = 0.0
 		anchor_top = 0.0
 		anchor_right = 0.0
@@ -895,7 +898,8 @@ func _configurar_enquadramento_universal() -> void:
 		position = Vector2.ZERO
 
 func _ponto_da_tela_para_o_jogo(ponto: Vector2) -> Vector2:
-	if OS.get_name() == "Android":
+	# No SubViewport o contêiner já entrega o ponto no espaço do jogo.
+	if OS.get_name() == "Android" and not (get_viewport() is SubViewport):
 		# Inversa de: tela = (jogo.y, 1080 - jogo.x).
 		return Vector2(TELA.x - ponto.y, ponto.x)
 	return ponto
@@ -2118,8 +2122,12 @@ func _registrar_impacto(
 		# tabela: é a mesma linha que decide o soluço da imagem, e não um
 		# segundo critério para a mesma ideia de "golpe que para tudo".
 		var derruba := float(pancada_nivel["hitstop"]) > 0.0
-		var reacao := arena.golpe(forca_visual, derruba, result_score)
+		var ultimo := socos.size() >= SOCOS_POR_RODADA
+		var reacao := arena.golpe(forca_visual, derruba, result_score, ultimo)
 		arena_nocaute = bool(reacao["nocaute"])
+		if ultimo and not arena_nocaute:
+			# Ele aguentou: a torcida comemora com ele.
+			sons.play("arena_publico", -4.0)
 		if bool(reacao.get("desdenhou", false)):
 			arena_frase = "ELE NEM SENTIU • TENTE MAIS FORTE"
 			sons.play("torcida_desdenho", -1.0)
@@ -4210,6 +4218,7 @@ func _carregar() -> void:
 			score_contraste = ScoreCurve.DEFAULT_CONTRASTE
 			score_ref_speed = ScoreCurve.REFERENCIA_AUTOMATICA
 			score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
+			hit_max_speed = maxf(hit_max_speed, ScoreCurve.DEFAULT_MAX_SPEED)
 			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
@@ -4941,7 +4950,7 @@ func _draw_score_hero() -> void:
 		# OS DOIS SOCOS CONTINUAM À VISTA NO RESULTADO, com o que deu a
 		# nota marcado. MELHOR só existe quando há com quem comparar: no
 		# resultado do primeiro soco ele é o melhor porque é o único.
-		_draw_cartoes_dos_socos(1600.0, socos.size() >= SOCOS_POR_RODADA)
+		_draw_cartoes_dos_socos(1618.0, socos.size() >= SOCOS_POR_RODADA)
 		if posicao_no_ranking > 0:
 			_apoio("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1800.0, Paleta.AMBAR)
 
@@ -5037,7 +5046,7 @@ const PLACAR_CORPO := 190
 ## a palavra MELHOR. É o que explica, sem texto de ajuda, por que a nota
 ## final é aquela.
 func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
-	const ALTURA := 140.0
+	const ALTURA := 124.0
 	const VAO := 24.0
 	var largura := (LARGURA_UTIL - VAO) * 0.5
 	# Qual soco vale a nota da rodada: o primeiro dos empatados, para a
@@ -5090,37 +5099,23 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 		# ajudante certo é `_texto_cabendo`, que recebe x e largura.
 		var dentro := caixa.size.x - 16.0
 		var esq := caixa.position.x + 8.0
+		# O MELHOR FICA NO PRÓPRIO RÓTULO. A faixa "MELHOR" acima do cartão
+		# encostava na frase do locutor; dentro do rótulo não briga com nada.
 		_texto_cabendo(
-			"SOCO %d" % (i + 1), caixa.position.y + 32.0,
+			("SOCO %d  •  MELHOR" if eh_melhor else "SOCO %d") % (i + 1), caixa.position.y + 32.0,
 			CORPO_APOIO, Color(cor, 0.95), dentro, esq
 		)
 		if feito:
+			# Só a pontuação: g e m/s saíram da tela do jogador (ficam na
+			# Central, para o técnico). Número grande, sozinho, lê de longe.
 			_texto_arcade(
-				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 92.0, 54,
+				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 98.0, 62,
 				Color.WHITE if not eh_melhor else cor, dentro, esq
 			)
-			# O MPU-6050 não mede massa em kg; inventar "peso" seria falso.
-			# Mostramos as duas leituras exatas disponíveis: pico em g e
-			# velocidade integrada, sempre ligadas ao cartão deste soco.
-			var medida := "%.2f m/s" % float(socos[i]["velocidade"])
-			var pico_g := float(socos[i].get("pico_g", 0.0))
-			if pico_g > 0.0:
-				medida = "PICO %.1f g  •  %s" % [pico_g, medida]
-			_texto_cabendo(
-				medida, caixa.position.y + 126.0,
-				CORPO_APOIO, Paleta.TINTA_LEVE, dentro, esq
-			)
-			if eh_melhor:
-				# A faixa MELHOR mora ACIMA do cartão: dentro dele ela
-				# brigaria com o rótulo do soco por 32 pixels de altura.
-				_texto_cabendo(
-					"MELHOR", caixa.position.y - 12.0,
-					CORPO_APOIO, cor, dentro, esq
-				)
 		else:
 			_texto_arcade(
 				"– – – –" if not esperando else "AGORA",
-				caixa.position.y + 92.0, 42, Color(cor, pulso), dentro, esq
+				caixa.position.y + 98.0, 42, Color(cor, pulso), dentro, esq
 			)
 
 ## O PLACAR ACEITA UM CORPO DE LETRA porque agora há dois tamanhos: a

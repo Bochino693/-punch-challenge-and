@@ -455,7 +455,7 @@ func aquecer(quadros := 24) -> void:
 		_poeira.restart()
 
 
-func golpe(forca: float, derruba := false, pontos := -1) -> Dictionary:
+func golpe(forca: float, derruba := false, pontos := -1, ultimo := false) -> Dictionary:
 	_tremor = clampf(0.35 + forca, 0.0, 1.35)
 	_clarao = clampf(0.4 + forca * 0.6, 0.0, 1.0)
 	_empurrao = forca
@@ -469,7 +469,7 @@ func golpe(forca: float, derruba := false, pontos := -1) -> Dictionary:
 		_poeira.restart()
 	if lutador == null:
 		return {"nocaute": false, "dano": 0.0, "reacao": "", "desdenhou": false}
-	var resposta := lutador.bater(forca, derruba, pontos)
+	var resposta := lutador.bater(forca, derruba, pontos, ultimo)
 	if bool(resposta.get("desdenhou", false)):
 		_publico = maxf(_publico, 0.66)
 		_clarao = maxf(_clarao, 0.28)

@@ -159,15 +159,21 @@ func _vestir() -> void:
 	_de_fabrica = de_fabrica
 	if de_fabrica:
 		# O visor: a faixa acesa no lugar dos olhos dá rosto ao androide.
+		var e := 1.0 / maxf(_escala_do_armature, 0.0001)
 		var visor := _peca_no_osso("Head", _cilindro(0.082, 0.082, 0.028, Color("33e0ff"), 0.0), 1.0)
 		if visor != null:
 			var mat_v := (visor.mesh as CylinderMesh).material as StandardMaterial3D
 			mat_v.emission_enabled = true
 			mat_v.emission = Color("33e0ff")
 			mat_v.emission_energy_multiplier = 2.2
-			var e := 1.0 / maxf(_escala_do_armature, 0.0001)
 			visor.position = Vector3(0.0, 0.075, 0.018) * e
 			visor.scale = Vector3(1.05, 1.0, 1.08) * e
+		# O CAPACETE DE TREINO: a cúpula vermelha
+		# fazem do androide liso um boxeador de academia; o visor fica à mostra.
+		var capacete := _peca_no_osso("Head", _esfera(0.128, COR_LUVA, 0.35, 0.05), 1.0)
+		if capacete != null:
+			capacete.position = Vector3(0.0, 0.122, -0.034) * e
+			capacete.scale = Vector3(1.0, 0.9, 1.0) * e
 		_mat_corpo = StandardMaterial3D.new()
 		_mat_corpo.albedo_color = COR_METAL
 		_mat_corpo.metallic = 0.75
@@ -185,6 +191,8 @@ func _vestir() -> void:
 		_mat_junta.emission_energy_multiplier = 1.4
 		for m in _modelo.find_children("*", "MeshInstance3D", true, false):
 			var mi := m as MeshInstance3D
+			if not str(mi.name).begins_with("Beta_"):
+				continue  # capacete e visor têm a cor própria
 			var junta := "joint" in str(mi.name).to_lower()
 			for s in mi.mesh.get_surface_count():
 				mi.set_surface_override_material(s, _mat_junta if junta else _mat_corpo)
@@ -208,10 +216,20 @@ func _vestir() -> void:
 		faixa.position = Vector3(0.0, 0.075, 0.0) * escala
 		faixa.scale = Vector3.ONE * escala
 	for lado in ["Left", "Right"]:
-		var perna := _peca_no_osso(lado + "UpLeg", _cilindro(0.098, 0.090, 0.22, COR_CALCAO), escala)
+		var perna := _peca_no_osso(lado + "UpLeg", _cilindro(0.118, 0.108, 0.22, COR_CALCAO), escala)
 		if perna != null:
-			perna.position = Vector3(0.0, 0.10, 0.0) * escala
+			perna.position = Vector3(0.0, -0.10, 0.0) * escala
 			perna.scale = Vector3.ONE * escala
+	# As botas de cano alto: pretas, com o cano amarelo.
+	for lado in ["Left", "Right"]:
+		var bota := _peca_no_osso(lado + "Leg", _cilindro(0.058, 0.052, 0.13, COR_CALCAO), escala)
+		if bota != null:
+			bota.position = Vector3(0.0, -0.37, 0.0) * escala
+			bota.scale = Vector3.ONE * escala
+		var cano := _peca_no_osso(lado + "Leg", _cilindro(0.061, 0.060, 0.022, COR_FAIXA, 0.6), escala)
+		if cano != null:
+			cano.position = Vector3(0.0, -0.30, 0.0) * escala
+			cano.scale = Vector3.ONE * escala
 
 
 func _peca_no_osso(curto: String, malha: MeshInstance3D, _escala: float) -> MeshInstance3D:
@@ -269,6 +287,7 @@ func _mover_o_corpo() -> void:
 	_alvo.clear()
 	_extra.clear()
 	var armado := _papel == "guard"
+	var festa := _papel == "celebra"
 	var calma := 1.0 - clampf(_recuo * 1.4, 0.0, 1.0)
 	if _caindo:
 		calma = 0.0
@@ -302,6 +321,29 @@ func _mover_o_corpo() -> void:
 	_apontar("RightLeg", Vector3(-0.06, -0.94, -0.34))
 	_apontar("LeftFoot", Vector3(0.1, -0.35, 0.93))
 	_apontar("RightFoot", Vector3(-0.2, -0.35, 0.91))
+
+	# O JOGO DE PERNAS: um joelho sobe de cada vez, no ritmo da ginga.
+	# A bacia desce até o pé mais baixo, então o outro pé sai do chão.
+	var passo_e := maxf(0.0, lado) * amplo
+	var passo_d := maxf(0.0, -lado) * amplo
+	_misturar("LeftUpLeg", Vector3(0.22, -0.70, 0.70), passo_e * 0.55)
+	_misturar("LeftLeg", Vector3(0.05, -0.80, -0.60), passo_e * 0.55)
+	_misturar("RightUpLeg", Vector3(-0.22, -0.72, 0.45), passo_d * 0.55)
+	_misturar("RightLeg", Vector3(-0.05, -0.80, -0.62), passo_d * 0.55)
+
+	# A COMEMORAÇÃO: aguentou a rodada — braços para o alto com a torcida.
+	if festa:
+		var entra := clampf(_tempo_no_papel * 3.0, 0.0, 1.0)
+		var soco := sin(_relogio * TAU * 1.6)
+		_misturar("LeftArm", Vector3(0.45, 0.88, 0.10), entra)
+		_misturar("RightArm", Vector3(-0.45, 0.88, 0.10), entra)
+		_misturar("LeftForeArm", Vector3(0.15, 1.0, 0.10 + 0.25 * soco), entra)
+		_misturar("RightForeArm", Vector3(-0.15, 1.0, 0.10 - 0.25 * soco), entra)
+		_misturar("LeftHand", Vector3(0.0, 1.0, 0.1), entra)
+		_misturar("RightHand", Vector3(0.0, 1.0, 0.1), entra)
+		_inclinar("Head", Vector3.RIGHT, deg_to_rad(-26.0) * entra)
+		_inclinar("Spine1", Vector3.RIGHT, deg_to_rad(-10.0) * entra)
+		_inclinar("Spine2", Vector3.UP, deg_to_rad(18.0) * sin(_relogio * TAU * 0.4) * entra)
 
 	# SOMBRA DE BOXE / PROVOCAÇÃO: jab, direto, jab.
 	if _papel == "taunt_weak":
@@ -345,11 +387,16 @@ func _mover_o_corpo() -> void:
 		_misturar("RightLeg", Vector3(-0.05, -1.0, 0.05), q)
 		_inclinar("Head", Vector3.FORWARD, deg_to_rad(25.0) * q)
 
-	_aplicar_pose(quique * 0.028 * amplo)
+	var pulo := 0.0
+	if festa:
+		pulo = absf(sin(_relogio * TAU * 1.1)) * 0.10
+	_aplicar_pose(quique * 0.028 * amplo + pulo)
 
 	# O CORPO INTEIRO: balanço, recuo do golpe e o tombo para trás.
 	var t := Transform3D.IDENTITY
 	t.origin.x += lado * 0.06 * amplo
+	# Entra e sai da distância, como quem mede o adversário.
+	t.origin.z += sin(fase * 0.5) * 0.05 * amplo
 	if not receita.is_empty() and _recuo > 0.001 and _papel != "taunt_weak":
 		var impacto2 := ease(_recuo, 0.35)
 		t.origin.z -= float(receita["tras"]) * impacto2 * (0.55 + _forca_do_recuo * 0.65)
