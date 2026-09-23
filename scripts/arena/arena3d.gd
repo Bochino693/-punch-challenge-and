@@ -14,7 +14,7 @@ extends SubViewport
 ##   • partículas com quantidade fixa (mudar `amount` realoca buffers e
 ##     engasga) e shaders compilados no arranque (`aquecer`).
 
-const TELA_LOGICA := Vector2(688.0, 770.0)
+const TELA_LOGICA := Vector2(784.0, 797.0)
 ## Degrau magro para quando o vigia de desempenho apertar.
 const FATOR_MAGRO := 0.75
 const DESCE_PARA_MAGRO := 0.50

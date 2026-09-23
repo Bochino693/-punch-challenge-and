@@ -25,10 +25,14 @@ extends RefCounted
 ## — o desenho, o `SubViewport` (que precisa da proporção certa para a
 ## imagem não esticar) e os testes.
 
-## A moldura inteira, borda incluída.
-const MOLDURA := Rect2(160.0, 462.0, 760.0, 856.0)
+## A moldura inteira, borda incluída. O QUADRO OCUPA A LARGURA TODA: o
+## lutador e o ringue são o espetáculo, e as colunas laterais de dano
+## saíram para dar lugar a eles (a vida agora é a barra de cima).
+const MOLDURA := Rect2(28.0, 290.0, 1024.0, 1040.0)
 ## O buraco da moldura: é aqui que a imagem da arena é desenhada.
-const TELA := Rect2(196.0, 508.0, 688.0, 770.0)
+const TELA := Rect2(50.0, 312.0, 980.0, 996.0)
+## A BARRA DE VIDA do adversário, acima do quadro, como num jogo de luta.
+const VIDA := Rect2(60.0, 196.0, 960.0, 54.0)
 ## As duas colunas de dano, uma de cada lado da moldura.
 const BARRA_E := Rect2(80.0, 508.0, 48.0, 770.0)
 const BARRA_D := Rect2(952.0, 508.0, 48.0, 770.0)
@@ -116,6 +120,45 @@ static func barras(alvo: CanvasItem, dano: float, tempo: float) -> void:
 				alvo.draw_rect(caixa, Color(cor, pisca))
 			else:
 				alvo.draw_rect(caixa, Color("3a141d"))
+
+## A BARRA DE VIDA — a leitura de jogo de luta, de longe.
+##
+## `vida` é o que sobrou (1 = inteiro); `fantasma` é a vida de um instante
+## atrás, que desce devagar e deixa à mostra, em branco, o pedaço que o
+## soco acabou de arrancar. É esse rastro que faz o golpe "doer" na tela.
+static func vida(alvo: CanvasItem, fonte: Font, vida: float, fantasma: float, tempo: float, rotulo: String) -> void:
+	var r := VIDA
+	var v := clampf(vida, 0.0, 1.0)
+	var f := clampf(maxf(fantasma, v), 0.0, 1.0)
+	# caixa: sombra, trilho escuro, fio de ouro
+	alvo.draw_rect(r.grow(8.0), Color(0, 0, 0, 0.45))
+	alvo.draw_rect(r.grow(4.0), ESCURO)
+	alvo.draw_rect(r, Color("2a0b14"))
+	# o rastro do golpe
+	if f > v:
+		alvo.draw_rect(Rect2(r.position.x + r.size.x * v, r.position.y, r.size.x * (f - v), r.size.y), Color(1, 1, 1, 0.85))
+	# a vida: verde → âmbar → vermelho; pisca quando está por um fio
+	var cor := Paleta.VERDE.lerp(Paleta.AMBAR, clampf((1.0 - v) / 0.5, 0.0, 1.0))
+	cor = cor.lerp(Paleta.VERMELHO, clampf((0.5 - v) / 0.35, 0.0, 1.0))
+	if v < 0.25:
+		cor = cor.lerp(Color.WHITE, 0.25 * (0.5 + 0.5 * sin(tempo * 12.0)))
+	var cheio := Rect2(r.position, Vector2(r.size.x * v, r.size.y))
+	alvo.draw_rect(cheio, cor)
+	# brilho de vidro na metade de cima
+	alvo.draw_rect(Rect2(cheio.position, Vector2(cheio.size.x, r.size.y * 0.38)), Color(1, 1, 1, 0.20))
+	# divisões a cada 10%
+	for i in range(1, 10):
+		var x := r.position.x + r.size.x * float(i) / 10.0
+		alvo.draw_line(Vector2(x, r.position.y + 6.0), Vector2(x, r.end.y - 6.0), Color(0, 0, 0, 0.35), 2.0)
+	alvo.draw_rect(r.grow(4.0), OURO, false, 3.0)
+	# o rótulo em cima da barra, à esquerda, e a porcentagem à direita
+	if fonte != null:
+		var base := r.position.y - 14.0
+		alvo.draw_string_outline(fonte, Vector2(r.position.x, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, 8, ESCURO)
+		alvo.draw_string(fonte, Vector2(r.position.x, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, Color.WHITE)
+		var pct := "%d%%" % int(round(v * 100.0))
+		alvo.draw_string_outline(fonte, Vector2(r.position.x, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 30, 8, ESCURO)
+		alvo.draw_string(fonte, Vector2(r.position.x, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 30, cor)
 
 ## A cor que a coluna está mostrando. O texto do medidor usa a mesma,
 ## senão o número e a barra parecem falar de coisas diferentes.

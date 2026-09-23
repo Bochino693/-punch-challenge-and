@@ -59,7 +59,7 @@ const MARGEM := 60.0
 ## meio do vazio — é o lutador dentro da moldura, e por isso o ponto saiu
 ## de 930 para o centro de `ArenaQuadro.TELA`. Mexer num sem mexer no
 ## outro faria as faíscas do soco explodirem ao lado de quem apanhou.
-const ALVO_DO_SOCO := Vector2(540.0, 893.0)
+const ALVO_DO_SOCO := Vector2(540.0, 810.0)
 const LARGURA_UTIL := TELA.x - MARGEM * 2.0
 
 ## As cores que voam. Saem da paleta porque confete branco, que num
@@ -4444,6 +4444,8 @@ func _draw_partida() -> void:
 ## é de propósito: se a imagem da arena pudesse ser desenhada de três
 ## lugares diferentes, um deles acabaria desenhando sem a moldura ou com
 ## as barras trocadas. Um caminho só, usado pelas duas telas do soco.
+var _vida_fantasma := 1.0
+
 func _draw_arena() -> void:
 	ArenaQuadro.fundo(self)
 	if arena != null and arena.ativa():
@@ -4454,7 +4456,12 @@ func _draw_arena() -> void:
 	# poderia sair de sincronia.
 	ArenaQuadro.moldura(self, ScoreTier.cor_de(result_score), clarao)
 	var dano := arena.dano() if arena != null else 0.0
-	ArenaQuadro.barras(self, dano, animation_time)
+	# A VIDA NO LUGAR DAS COLUNAS. A barra real cai na hora; o rastro
+	# branco desce devagar atrás dela, mostrando o tamanho do estrago.
+	var vida_real := 1.0 - clampf(dano, 0.0, 1.0)
+	if vida_real > _vida_fantasma:
+		_vida_fantasma = vida_real
+	_vida_fantasma = move_toward(_vida_fantasma, vida_real, get_process_delta_time() * 0.45)
 	# A PLAQUETA DE CIMA DIZ O QUE AS BARRAS MEDEM. Duas colunas
 	# coloridas sem legenda são bonitas e mudas: quem está na frente da
 	# máquina não tem como saber se aquilo é tempo, força ou vida.
@@ -4464,11 +4471,7 @@ func _draw_arena() -> void:
 	var estado := ArenaFrases.de_dano(dano)
 	if arena != null and arena.na_lona():
 		estado = "NA LONA"
-	_letreiro_centrado(
-		"ADVERSÁRIO  •  %s  %d%%" % [estado, int(round(dano * 100.0))],
-		ArenaQuadro.MOLDURA.position.y + 32.0, _corpo(24),
-		ArenaQuadro.cor_do_dano(dano), fonte_texto
-	)
+	ArenaQuadro.vida(self, fonte, vida_real, _vida_fantasma, animation_time, "ADVERSÁRIO  •  %s" % estado)
 
 ## A TELA QUE ESPERA O SOCO.
 ##
@@ -4646,9 +4649,32 @@ func _draw_show_idle() -> void:
 			Rect2(300, 1700, 480, 62), Color(Paleta.VERMELHO, 0.20 * bate),
 			Color(Paleta.AMBAR, bate), chegada, 3.0
 		)
-	_texto(
-		"JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits,
-		1740.0, 26, cor_credito
+	_draw_placa_de_creditos(cor_credito, chegada)
+
+## A PLACA DE CRÉDITOS. Era uma linha amarela miúda solta sobre a faixa
+## vermelha do rodapé — cor quente em cima de cor quente, e pequena: de
+## longe virava um borrão. Agora é uma placa escura com a ficha desenhada,
+## o rótulo em branco e o número grande na letra do placar.
+func _draw_placa_de_creditos(cor: Color, alpha: float) -> void:
+	var caixa := Rect2(330.0, 1690.0, 420.0, 76.0)
+	_cartao(caixa, Color("12040a", 0.92), Color(cor, 0.9), alpha, 3.0)
+	var meio_y := caixa.position.y + caixa.size.y * 0.5
+	if game_mode == "free":
+		_letreiro_centrado("JOGO LIVRE", meio_y + 15.0, 40, Color(cor, alpha))
+		return
+	Icones.ficha(self, Vector2(caixa.position.x + 44.0, meio_y), 24.0, Color(Paleta.AMBAR, alpha))
+	draw_string(
+		fonte_texto, Vector2(caixa.position.x + 84.0, meio_y + 13.0), "CRÉDITOS",
+		HORIZONTAL_ALIGNMENT_LEFT, 200.0, _corpo(36), Color(Color.WHITE, alpha)
+	)
+	var numero := "%02d" % credits
+	draw_string_outline(
+		fonte, Vector2(caixa.position.x, meio_y + 20.0), numero,
+		HORIZONTAL_ALIGNMENT_RIGHT, caixa.size.x - 26.0, 52, 8, Color(Paleta.CONTORNO, alpha)
+	)
+	draw_string(
+		fonte, Vector2(caixa.position.x, meio_y + 20.0), numero,
+		HORIZONTAL_ALIGNMENT_RIGHT, caixa.size.x - 26.0, 52, Color(cor, alpha)
 	)
 
 func _capitulo_da_marca(alpha: float) -> void:

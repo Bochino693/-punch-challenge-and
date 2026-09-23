@@ -32,8 +32,12 @@ const TEMPO_LEVANTAR := 1.25
 
 const PAPEIS_CONTINUOS := ["idle", "guard"]
 const PAPEIS := {
-	"idle": {"quadros": ["idle", "guarda"], "ciclo": 1.05},
-	"guard": {"quadros": ["guarda", "preparado"], "ciclo": 0.72},
+	# PARADO É UMA POSE SÓ, E QUEM MEXE É O CORPO. Trocar de imagem a cada
+	# segundo (idle ↔ guarda) fazia o lutador "piscar" entre dois desenhos
+	# quase iguais — lia como slide, não como gente. A ginga abaixo
+	# (`_ginga`) é que dá vida: quica, balança e inclina, sem corte.
+	"idle": {"quadros": ["guarda"]},
+	"guard": {"quadros": ["preparado"]},
 	"taunt_weak": {"quadros": ["jab", "direto", "jab", "guarda"], "ciclo": 0.30},
 	"hit_light": {"quadros": ["impacto_corpo"]},
 	"hit_medium": {"quadros": ["impacto_corpo"]},
@@ -259,10 +263,7 @@ func _mostrar(indice: int) -> void:
 
 
 func _mover_o_corpo() -> void:
-	var t := Transform3D.IDENTITY
-	# Respiração e um balanço lento: o corpo nunca fica congelado.
-	t.origin.y += (1.0 - cos(_relogio * 2.1)) * 0.007 + (1.0 - cos(_relogio * 0.7)) * 0.003
-	t.origin.x += sin(_relogio * 0.43) * 0.012
+	var t := _ginga()
 
 	var receita: Dictionary = RECUO.get(_papel, {})
 	if not receita.is_empty() and _recuo > 0.001:
@@ -281,6 +282,37 @@ func _mover_o_corpo() -> void:
 		t.origin.y += sin(clampf((queda - 0.82) / 0.18, 0.0, 1.0) * PI) * 0.035
 
 	_corpo.transform = _pousado_na_lona(t)
+
+
+## A GINGA DO BOXEADOR.
+##
+## Um lutador de verdade nunca está parado: quica na ponta dos pés, pende
+## o corpo de um lado para o outro e inclina o tronco junto. São três
+## movimentos em compassos casados — o quique no dobro do balanço — para
+## o corpo desenhar um "oito" e não um pêndulo mecânico.
+##
+## Na guarda armada (esperando o soco) a ginga fica mais curta e rápida:
+## ele fecha a guarda e fica pronto. Durante uma reação a ginga some aos
+## poucos, e o recuo do golpe é que manda.
+func _ginga() -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var armado := _papel == "guard"
+	var compasso := 1.55 if armado else 1.25     # balanços por segundo
+	var amplo := 0.62 if armado else 1.0
+	var calma := 1.0 - clampf(_recuo * 1.4, 0.0, 1.0)
+	if _caindo:
+		calma = 0.0
+	var fase := _relogio * TAU * compasso * 0.5
+	# o quique: sobe e desce duas vezes por balanço, sempre acima da lona
+	var quique := absf(sin(fase * 2.0))
+	t.origin.y += quique * 0.030 * amplo * calma
+	# o balanço lateral e a inclinação do tronco acompanhando
+	var lado := sin(fase)
+	t.origin.x += lado * 0.075 * amplo * calma
+	t.basis = t.basis.rotated(Vector3.FORWARD, -lado * 0.045 * amplo * calma)
+	# a respiração por baixo de tudo
+	t.origin.y += (1.0 - cos(_relogio * 2.1)) * 0.004
+	return t
 
 
 ## Nenhuma parte do desenho passa abaixo da lona, em pose nenhuma.

@@ -1,6 +1,9 @@
 package com.lazersport.punch.usbserial
 
 import android.app.PendingIntent
+import android.graphics.SurfaceTexture
+import android.os.Handler
+import android.os.HandlerThread
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -78,6 +81,22 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     private var cameraPreviewView: AspectRatioTextureView? = null
     private val renderedFrameInFlight = AtomicBoolean(false)
     @Volatile private var lastRenderedFrameRequestAt = 0L
+
+    // ------------------------------------------------------------------
+    // CÂMERA DO SISTEMA (API clássica android.hardware.Camera).
+    //
+    // O CameraServer do Godot usa a Camera2 do NDK, que NÃO lista câmeras
+    // de nível LEGACY — e é exatamente assim que as TV boxes Amlogic
+    // publicam a webcam USB (driver uvcvideo do kernel + HAL antigo). A
+    // API clássica enxerga essas câmeras. Ela é tentada primeiro; a UVC
+    // direta (AUSBC) fica como reserva para aparelhos sem HAL de câmera.
+    @Suppress("DEPRECATION")
+    @Volatile private var systemCamera: android.hardware.Camera? = null
+    private var systemCameraThread: HandlerThread? = null
+    private var systemCameraTexture: SurfaceTexture? = null
+    @Volatile private var systemCameraTried = false
+    // A câmera do sistema existe mas não abriu: daí em diante vale a UVC direta.
+    @Volatile private var systemCameraFailed = false
 
     private val previewCallback = object : IPreviewDataCallBack {
         override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
@@ -265,6 +284,12 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
             if (host.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 host.requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
             }
+            // Com a câmera do sistema disponível, não se pede a USB da webcam:
+            // quem fala com ela é o próprio Android.
+            if (!systemCameraFailed && (systemCamera != null || systemCameraTried || systemCameraCount() > 0)) {
+                startUvcCamera()
+                return@runOnUiThread
+            }
             val cameras = uvcCameras()
             if (cameras.isEmpty()) {
                 cameraStatus = "NENHUMA WEBCAM USB/UVC NO BARRAMENTO"
@@ -292,11 +317,139 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         return cameraStatus
     }
 
+    /** Quantas câmeras a API clássica do Android enxerga. */
+    /** Para o jogo decidir quem abre a câmera: esta ponte ou o CameraServer. */
+    @UsedByGodot
+    fun getSystemCameraCount(): Int = if (systemCameraFailed) 0 else systemCameraCount()
+
+    @Suppress("DEPRECATION")
+    private fun systemCameraCount(): Int = try {
+        android.hardware.Camera.getNumberOfCameras()
+    } catch (_: Throwable) {
+        0
+    }
+
+    /**
+     * Abre a câmera pela API clássica numa thread própria com Looper (os
+     * quadros chegam nela, nunca na thread do jogo). Devolve true se o
+     * pedido foi feito; o resultado aparece em cameraStatus e nos quadros.
+     */
+    @Suppress("DEPRECATION")
+    private fun startSystemCamera(host: android.app.Activity): Boolean {
+        if (systemCamera != null) return true
+        if (systemCameraFailed) return false
+        val total = systemCameraCount()
+        if (total <= 0) return false
+        if (host.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            // A câmera existe: espera a permissão em vez de cair na UVC
+            // direta, que tomaria o aparelho para si.
+            cameraStatus = "PERMITA A CÂMERA DO ANDROID"
+            return true
+        }
+        systemCameraTried = true
+        val thread = systemCameraThread ?: HandlerThread("punch-camera").also {
+            it.start()
+            systemCameraThread = it
+        }
+        Handler(thread.looper).post { openSystemCameraNow(total) }
+        cameraStatus = "ABRINDO CÂMERA DO SISTEMA ($total ENCONTRADA)"
+        return true
+    }
+
+    @Suppress("DEPRECATION")
+    private fun openSystemCameraNow(total: Int) {
+        if (systemCamera != null) return
+        var camera: android.hardware.Camera? = null
+        var ultimoErro = ""
+        // A webcam USB costuma ser a última da lista; a primeira que abrir vale.
+        for (index in (total - 1) downTo 0) {
+            try {
+                camera = android.hardware.Camera.open(index)
+                break
+            } catch (t: Throwable) {
+                ultimoErro = t.message ?: t.javaClass.simpleName
+            }
+        }
+        if (camera == null) {
+            cameraStatus = "CÂMERA DO SISTEMA NÃO ABRIU: $ultimoErro"
+            systemCameraTried = false
+            systemCameraFailed = true
+            return
+        }
+        try {
+            val params = camera.parameters
+            val tamanhos = params.supportedPreviewSizes.orEmpty()
+            val escolhido = tamanhos.minByOrNull {
+                kotlin.math.abs(it.width - UVC_WIDTH) + kotlin.math.abs(it.height - UVC_HEIGHT)
+            }
+            if (escolhido != null) params.setPreviewSize(escolhido.width, escolhido.height)
+            params.previewFormat = android.graphics.ImageFormat.NV21
+            try { camera.parameters = params } catch (_: Throwable) { }
+            val tamanho = camera.parameters.previewSize
+            val largura = tamanho.width
+            val altura = tamanho.height
+            val bytes = largura * altura * 3 / 2
+            // Superfície de mentira: a API exige um destino de pré-visualização,
+            // mas os quadros de verdade vêm pelo callback abaixo.
+            val textura = SurfaceTexture(42)
+            systemCameraTexture = textura
+            camera.setPreviewTexture(textura)
+            camera.addCallbackBuffer(ByteArray(bytes))
+            camera.addCallbackBuffer(ByteArray(bytes))
+            camera.setPreviewCallbackWithBuffer { data, cam ->
+                if (data != null) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastCameraFrameAt >= UVC_MIN_FRAME_INTERVAL_MS && data.size >= largura * altura * 3 / 2) {
+                        val rgba = nv21ToRgba(data, largura, altura)
+                        synchronized(cameraFrameLock) {
+                            latestRgbaFrame = rgba
+                            cameraFrameWidth = largura
+                            cameraFrameHeight = altura
+                            lastCameraFrameAt = now
+                            lastCameraFrameFormat = "SISTEMA_NV21"
+                            cameraFramesAccepted++
+                        }
+                        cameraStatus = "CÂMERA AO VIVO — ${largura}x${altura}"
+                    }
+                }
+                try { cam.addCallbackBuffer(data) } catch (_: Throwable) { }
+            }
+            camera.setErrorCallback { erro, _ ->
+                cameraStatus = "CÂMERA DO SISTEMA CAIU (erro $erro)"
+                stopSystemCamera()
+            }
+            camera.startPreview()
+            systemCamera = camera
+            cameraStatus = "CÂMERA DO SISTEMA TRANSMITINDO ${largura}x${altura}"
+        } catch (t: Throwable) {
+            cameraStatus = "CÂMERA DO SISTEMA FALHOU: ${t.message ?: t.javaClass.simpleName}"
+            try { camera.release() } catch (_: Throwable) { }
+            systemCameraTried = false
+            systemCameraFailed = true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopSystemCamera() {
+        val camera = systemCamera
+        systemCamera = null
+        systemCameraTried = false
+        try { camera?.setPreviewCallbackWithBuffer(null) } catch (_: Throwable) { }
+        try { camera?.stopPreview() } catch (_: Throwable) { }
+        try { camera?.release() } catch (_: Throwable) { }
+        try { systemCameraTexture?.release() } catch (_: Throwable) { }
+        systemCameraTexture = null
+    }
+
     /** Abre a UVC de verdade. CameraServer sozinho não publica webcams USB
      * em várias TV boxes; esta ponte entrega o RGBA diretamente ao Godot. */
     @UsedByGodot
     fun startUvcCamera(): Boolean {
         val host = activity ?: return fail("tela Android ainda não disponível")
+        // 1º: a câmera do sistema (API clássica). Se ela existe, a UVC
+        // direta NÃO é aberta: as duas brigariam pelo mesmo aparelho.
+        if (systemCamera != null || (systemCameraTried && !systemCameraFailed)) return true
+        if (startSystemCamera(host)) return true
         host.runOnUiThread {
             try {
                 if (cameraClient == null) {
@@ -321,6 +474,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     @UsedByGodot
     fun stopUvcCamera() {
         val host = activity
+        stopSystemCamera()
         val action = {
             closeActiveCamera()
             try { cameraClient?.unRegister() } catch (_: Throwable) { }
@@ -468,7 +622,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
 
     @UsedByGodot
     fun getUsbCameraStatus(): String {
-        if (activeCamera != null) return cameraStatus
+        if (activeCamera != null || systemCamera != null || systemCameraTried) return cameraStatus
         val cameras = try { uvcCameras() } catch (_: Throwable) { emptyList() }
         if (cameras.isEmpty()) return "NENHUMA WEBCAM USB/UVC DETECTADA"
         val allowed = cameras.count { usbManager.hasPermission(it) }

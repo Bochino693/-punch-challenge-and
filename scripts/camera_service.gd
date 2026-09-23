@@ -136,8 +136,23 @@ func _preparar_android_usb() -> void:
 	if _android_bridge != null and _android_bridge.has_method("prepareAndroidKiosk"):
 		_android_bridge.call("prepareAndroidKiosk")
 
+## QUEM ABRE A CÂMERA NO ANDROID — um só, nunca os dois.
+##
+## A ponte do plugin (API clássica do Android, com a UVC direta de reserva)
+## enxerga a webcam USB das TV boxes Amlogic, que o CameraServer do Godot
+## não lista. Quando a ponte vê câmera, o CameraServer fica de fora; quando
+## só o CameraServer vê (HAL novo com câmera externa), a ponte fica de fora.
+func _ponte_tem_camera() -> bool:
+	return _android_bridge != null and _android_bridge.has_method("getSystemCameraCount") \
+		and int(_android_bridge.call("getSystemCameraCount")) > 0
+
+func _servidor_tem_camera() -> bool:
+	return not CameraServer.feeds().is_empty()
+
 func _requisitar_webcam_usb_android(forcar := false) -> void:
 	if OS.get_name() != "Android" or _android_bridge == null:
+		return
+	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
 		return
 	var agora := Time.get_ticks_msec()
 	if not forcar and agora < _proxima_permissao_usb_ms:
@@ -189,6 +204,8 @@ func iniciar_captura() -> void:
 func _iniciar_uvc_android() -> void:
 	if OS.get_name() != "Android" or _android_bridge == null:
 		return
+	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
+		return
 	if _android_bridge.has_method("startUvcCamera"):
 		_android_bridge.call("startUvcCamera")
 
@@ -237,6 +254,10 @@ func definir_ritmo(ms: int) -> void:
 
 func _descobrir_cameras(recriar_extensao: bool) -> void:
 	_acordar_servidor()
+	# Com a ponte Android dona da câmera, o CameraServer não abre nada:
+	# dois donos para a mesma webcam derrubam os dois.
+	if OS.get_name() == "Android" and _ponte_tem_camera():
+		return
 	# Primeiro aproveita qualquer feed já publicado. Isso cobre backends do
 	# próprio sistema e evita recriar a extensão quando a câmera já está viva.
 	if not CameraServer.feeds().is_empty():
@@ -436,6 +457,8 @@ func _tentar_liberar_privacidade() -> void:
 
 func _adotar_camera_usb_preferida() -> void:
 	if not enabled:
+		return
+	if OS.get_name() == "Android" and _ponte_tem_camera():
 		return
 	var feeds: Array = CameraServer.feeds()
 	# REPARAR NAS NOVAS ANTES DE ESCOLHER. É aqui que uma webcam USB
