@@ -109,8 +109,8 @@ const PASSOS := {
 	"curva": Rect2(570, 526, 400, 58),
 	"porta": Rect2(110, 1470, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1566, 400, LADO_BOTAO),
-	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
-	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
+	"vol_musica": Rect2(110, 1586, 400, LADO_BOTAO),
+	"vol_efeitos": Rect2(570, 1586, 400, LADO_BOTAO),
 	# --- página SACO
 	"curso_motor": Rect2(110, 700, 400, LADO_BOTAO),
 	"pausa_motor": Rect2(570, 700, 400, LADO_BOTAO),
@@ -167,7 +167,7 @@ const BOTOES_SIMPLES := {
 	"camera_obrigatoria": Rect2(690, 484, 280, 56),
 	"diagnosticar": Rect2(110, 920, 400, 56),
 	"instalar_camera": Rect2(570, 920, 400, 56),
-	"testar_som": Rect2(300, 1498, 480, 60),
+	"testar_som": Rect2(300, 1698, 480, 60),
 	# --- página DADOS
 	"zerar": Rect2(110, DADOS_APAGAR_Y + 70.0, 207, 60),
 	"zerar_stats": Rect2(327, DADOS_APAGAR_Y + 70.0, 207, 60),
@@ -1657,6 +1657,17 @@ func _manter_festa_do_ranking(delta: float) -> void:
 # ENTRADA DE COMANDOS
 # ======================================================================
 func _input(event: InputEvent) -> void:
+	# O CONTROLE REMOTO DA TV BOX. Menu abre/fecha a Central; com ela
+	# aberta, as setas andam entre os botões, OK aperta e Voltar fecha.
+	if event is InputEventKey and event.pressed:
+		var tecla := (event as InputEventKey).keycode
+		if tecla == KEY_MENU and not event.echo:
+			_toggle_central()
+			get_viewport().set_input_as_handled()
+			return
+		if central_aberta and not calib_ativo and _navegar_central_pelo_controle(tecla, event.echo):
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F9:
 			_toggle_central()
@@ -3558,6 +3569,8 @@ func _toggle_central() -> void:
 		if state != GameDef.State.IDLE and state != GameDef.State.RESULT:
 			_entrar_em_abertura()
 		central_aberta = true
+		# O foco do controle remoto começa na aba da página aberta.
+		_foco_central = central_pagina
 		sons.silence()
 		if link != null and link.available():
 			portas_visiveis = link.list_ports()
@@ -3660,10 +3673,120 @@ func _tocou(chave: String, p: Vector2) -> bool:
 	var r: Rect2 = BOTOES_SIMPLES[chave]
 	return r.has_point(_ponto_do_controle(chave, p))
 
+## ============================================================ CONTROLE
+## A Central era só de mouse, e a TV Box só tem o controle remoto. Cada
+## botão visível da página vira um ALVO; as setas levam ao alvo mais
+## próximo naquela direção, OK clica no centro dele (pelo mesmo
+## `_click_central` do mouse) e a página rola sozinha para mostrar o foco.
+var _foco_central := 0
+
+func _alvos_da_central() -> Array:
+	var alvos := []
+	for i in range(PAGINAS.size()):
+		alvos.append({"r": Rect2(ABA_RECT.position.x + float(i) * ABA_LARGURA, ABA_RECT.position.y, ABA_LARGURA, ABA_RECT.size.y), "fixo": true})
+	for chave in PASSOS:
+		if _visivel_na_pagina(chave):
+			var fixo := int(PAGINA_DO_CONTROLE.get(chave, -1)) < 0
+			alvos.append({"r": _passo_menos(chave), "fixo": fixo})
+			alvos.append({"r": _passo_mais(chave), "fixo": fixo})
+	for chave in BOTOES_SIMPLES:
+		if _visivel_na_pagina(str(chave)):
+			alvos.append({"r": BOTOES_SIMPLES[chave], "fixo": int(PAGINA_DO_CONTROLE.get(chave, -1)) < 0})
+	return alvos
+
+func _centro_na_pagina(alvo: Dictionary) -> Vector2:
+	var c := (alvo["r"] as Rect2).get_center()
+	if bool(alvo["fixo"]) and c.y > 1000.0:
+		# Rodapé fixo: fica sempre abaixo do fim da página.
+		c.y += _rolagem_maxima() + 400.0
+	return c
+
+## Retângulo do alvo NA TELA (descontada a rolagem do miolo).
+func _rect_na_tela(alvo: Dictionary) -> Rect2:
+	var r: Rect2 = alvo["r"]
+	if not bool(alvo["fixo"]):
+		r.position.y -= central_rolagem
+	return r
+
+func _navegar_central_pelo_controle(tecla: int, repetindo: bool) -> bool:
+	var direcao := Vector2.ZERO
+	match tecla:
+		KEY_UP: direcao = Vector2.UP
+		KEY_DOWN: direcao = Vector2.DOWN
+		KEY_LEFT: direcao = Vector2.LEFT
+		KEY_RIGHT: direcao = Vector2.RIGHT
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			if repetindo:
+				return true
+			var alvos := _alvos_da_central()
+			if alvos.is_empty():
+				return true
+			_foco_central = clampi(_foco_central, 0, alvos.size() - 1)
+			_click_central(_rect_na_tela(alvos[_foco_central]).get_center())
+			return true
+		KEY_BACK, KEY_ESCAPE:
+			if repetindo:
+				return true
+			_fechar_central()
+			return true
+		_:
+			return false
+	var lista := _alvos_da_central()
+	if lista.is_empty():
+		return true
+	_foco_central = clampi(_foco_central, 0, lista.size() - 1)
+	# Tudo medido no espaço da PÁGINA (os fixos do rodapé entram com a
+	# rolagem somada): assim descer percorre a página inteira, e os
+	# botões do rodapé só ganham quando não há mais nada abaixo.
+	var daqui := _centro_na_pagina(lista[_foco_central])
+	var melhor := -1
+	var melhor_nota := INF
+	for i in range(lista.size()):
+		if i == _foco_central:
+			continue
+		var d := _centro_na_pagina(lista[i]) - daqui
+		var ao_longo := d.dot(direcao)
+		if ao_longo <= 4.0:
+			continue
+		var de_lado := absf(d.dot(Vector2(-direcao.y, direcao.x)))
+		var nota := ao_longo + de_lado * 1.2
+		if bool(lista[i]["fixo"]) and not bool(lista[_foco_central]["fixo"]) and absf(direcao.y) > 0.5:
+			nota += 2000.0
+		if nota < melhor_nota:
+			melhor_nota = nota
+			melhor = i
+	if melhor >= 0:
+		_foco_central = melhor
+		sons.play("tick", -14.0)
+	# A página rola para o foco ficar à vista.
+	var alvo: Dictionary = lista[_foco_central]
+	if not bool(alvo["fixo"]):
+		var r: Rect2 = alvo["r"]
+		if r.position.y - central_rolagem < 380.0:
+			central_rolagem = clampf(r.position.y - 380.0, 0.0, _rolagem_maxima())
+		elif r.end.y - central_rolagem > 1740.0:
+			central_rolagem = clampf(r.end.y - 1740.0, 0.0, _rolagem_maxima())
+	return true
+
+## O anel do foco, por cima de tudo na Central.
+func _draw_foco_da_central() -> void:
+	var alvos := _alvos_da_central()
+	if alvos.is_empty():
+		return
+	_foco_central = clampi(_foco_central, 0, alvos.size() - 1)
+	var r := _rect_na_tela(alvos[_foco_central]).grow(6.0)
+	var pulso := 0.6 + 0.4 * sin(animation_time * 6.0)
+	draw_rect(r, Color(Paleta.AMBAR, 0.18 * pulso))
+	draw_rect(r, Color(Paleta.AMBAR, pulso), false, 5.0)
+
 func _click_central(p: Vector2) -> void:
 	# As abas primeiro: elas ficam por cima de tudo.
 	if ABA_RECT.has_point(p):
 		central_pagina = clampi(int((p.x - ABA_RECT.position.x) / ABA_LARGURA), 0, PAGINAS.size() - 1)
+		# A aba da câmera já abre com o relatório na tela: é a foto dele que
+		# resolve, e ninguém precisa descobrir que existe um botão para isso.
+		if central_pagina == 2 and (medico == null or not medico.rodando):
+			_examinar_camera(false)
 		# Cada aba começa do começo. Chegar numa página nova já rolada até
 		# o meio é o tipo de coisa que faz o técnico achar que faltou
 		# conteúdo em cima.
@@ -5351,7 +5474,7 @@ func _draw_central() -> void:
 	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
 	# A VERSÃO À VISTA: é o primeiro número a conferir quando algo não bate
 	# com o que foi prometido — foto da Central já diz qual APK está rodando.
-	_texto("VERSÃO %d" % Versao.NUMERO, 204.0, 20, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 860.0)
+	_texto("VERSÃO %d" % Versao.NUMERO, 240.0, 20, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 860.0)
 	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
 	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
 	_abas_da_central()
@@ -5360,9 +5483,10 @@ func _draw_central() -> void:
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
 	_texto(
-		"Tecla T: testar sensor  •  Roda/setas: rolar a página",
+		"Controle remoto: setas escolhem  •  OK aperta  •  Voltar fecha",
 		1872.0, 14, Paleta.TINTA_LEVE
 	)
+	_draw_foco_da_central()
 
 ## A BARRA DE ROLAGEM, à direita do miolo.
 ##
@@ -5548,14 +5672,14 @@ func _central_golpe() -> void:
 			"só os 30%% mais fortes passam de %d pontos, em qualquer gabinete" % (
 				ScoreCurve.PONTOS_DE_REFERENCIA
 			),
-			996.0, 14, Paleta.TINTA_LEVE
+			1004.0, 14, Paleta.TINTA_LEVE
 		)
 	else:
 		_texto(
 			"indo para  %.2f  /  %.2f  /  %.2f m/s   (mínimo / médio / máximo)" % [
 				float(destino["vmin"]), float(destino["vref"]), float(destino["vmax"])
 			],
-			996.0, 14, Paleta.CIANO
+			1004.0, 14, Paleta.CIANO
 		)
 
 	_secao(Rect2(80, 1042, 920, 240), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
@@ -5570,7 +5694,7 @@ func _central_golpe() -> void:
 	_curva_desenhada(Rect2(110, 1180, 860, 56))
 	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
-	_secao(Rect2(80, 1386, 920, 324), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
+	_secao(Rect2(80, 1380, 920, 330), "SENSOR ÓPTICO DE FENDA (LM393)", Paleta.ROXO)
 	_seletor_porta_refinado()
 	var nome_polaridade: String = str({"A":"AUTO", "H":"ALTO", "L":"BAIXO"}.get(sensor_eixo, "AUTO"))
 	_botao(BOTOES_SIMPLES["eixo"], "SINAL  %s" % nome_polaridade, false, Paleta.ROXO, 20)
@@ -5746,7 +5870,7 @@ func _central_camera() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 		)
 	# ---- o relatório, na tela, e não numa janela que abre atrás do jogo
-	_secao(Rect2(80, 866, 920, 420), "DIAGNÓSTICO DA CÂMERA", Paleta.AMBAR)
+	_secao(Rect2(80, 866, 920, 620), "DIAGNÓSTICO DA CÂMERA", Paleta.AMBAR)
 	var ocupado := medico != null and medico.rodando
 	_botao(BOTOES_SIMPLES["diagnosticar"], "AGUARDE…" if ocupado else "DIAGNOSTICAR", ocupado, Paleta.CIANO, 18)
 	_botao(BOTOES_SIMPLES["instalar_camera"], "RESOLVER ACESSO", false, Paleta.VERDE, 18)
@@ -5774,23 +5898,25 @@ func _central_camera() -> void:
 			1086.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
-		for i in range(medico.linhas.size()):
+		# Trinta pixels por linha e a linha encolhe até caber: o relatório
+		# da ponte tem frases longas (USB, Camera2) e nenhuma pode invadir
+		# a de baixo nem sair da caixa. Cabem até catorze.
+		for i in range(mini(medico.linhas.size(), 14)):
 			var linha := str(medico.linhas[i])
 			# Aviso em vermelho, resposta comum em creme: quem olha de
 			# relance precisa achar o problema sem ler tudo.
 			var grave := linha == linha.to_upper() and linha.length() > 12
-			_texto(
-				linha, 1000.0 + float(i) * 22.0, 15,
-				Paleta.VERMELHO if grave else Paleta.CREME,
-				HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+			_texto_cabendo(
+				linha, 1010.0 + float(i) * 30.0, 16,
+				Paleta.VERMELHO if grave else Paleta.CREME, 860.0, 120.0
 			)
 	if medico != null and not medico.indices.is_empty():
 		_texto(
 			"CÂMERAS ENCONTRADAS NOS ÍNDICES: %s" % _lista_de_indices(medico.indices),
-			1256.0, 17, Paleta.VERDE
+			1456.0, 17, Paleta.VERDE
 		)
 
-	_secao(Rect2(80, 1302, 920, 290), "MESA DE SOM", Paleta.VERDE)
+	_secao(Rect2(80, 1502, 920, 290), "MESA DE SOM", Paleta.VERDE)
 	_stepper("vol_musica", "%+.0f dB" % volume_musica, "TRILHA", Paleta.CIANO)
 	_stepper("vol_efeitos", "%+.0f dB" % volume_efeitos, "EFEITOS E VOZ", Paleta.AMBAR)
 	_botao(BOTOES_SIMPLES["testar_som"], "TOCAR SOCO DE TESTE", false, Paleta.VERDE, 19)
@@ -5806,9 +5932,9 @@ func _central_dados() -> void:
 	var resumo := StatisticsStore.summary(statistics)
 	_texto(
 		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
-		502.0, 16, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		522.0, 16, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	_texto("Recorde da casa: %04d" % _melhor(), 532.0, 18, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+	_texto("Recorde da casa: %04d" % _melhor(), 552.0, 18, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
 
 	# A SEÇÃO CRESCEU PORQUE AS LINHAS NÃO CABIAM — e não caber não era
 	# um detalhe de estética: as três últimas linhas do diagnóstico
@@ -6376,13 +6502,13 @@ func _seletor_porta_refinado() -> void:
 	# cego do teste.
 	_texto_cabendo(porta, visor.position.y + 43.0, 25, Paleta.TINTA, visor.size.x - 72.0, visor.position.x + 46.0)
 
-	draw_circle(Vector2(126.0, 1431.0), 4.0, cor, true, -1.0, true)
-	_texto_cabendo(serial_status, 1437.0, 14, Paleta.para_texto(cor), 822.0, 140.0)
+	draw_circle(Vector2(126.0, 1452.0), 4.0, cor, true, -1.0, true)
+	_texto_cabendo(serial_status, 1459.0, 14, Paleta.para_texto(cor), 822.0, 140.0)
 	_texto(
 		(
-			"BUSCA AUTOMÁTICA — o jogo continua aberto e reconecta sozinho"
+			"BUSCA AUTOMÁTICA — reconecta sozinho"
 			if porta_configurada.is_empty()
-			else "PORTA PREFERENCIAL — o jogo continua aberto e reconecta sozinho"
+			else "PORTA PREFERENCIAL — reconecta sozinho"
 		),
 		r.end.y + 27.0, 13, Paleta.TINTA_FRACA,
 		HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
@@ -6601,6 +6727,10 @@ func _draw_player_photo(rect: Rect2, path: String, alpha: float) -> void:
 ## No rodapé, discretos, e só quando há o que dizer. Uma máquina em
 ## operação normal nunca os vê.
 func _draw_alertas_graves() -> void:
+	# Com a Central aberta o aviso sai: ele ficaria por baixo do rodapé
+	# dela, e a própria Central já mostra o mesmo defeito por extenso.
+	if central_aberta:
+		return
 	var recados: Array[String] = []
 	if not Versao.acentos_inteiros():
 		recados.append(Versao.recado_do_estrago())

@@ -98,6 +98,18 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     // A câmera do sistema existe mas não abriu: daí em diante vale a UVC direta.
     @Volatile private var systemCameraFailed = false
 
+    // UVC DIRETA: a mesma libuvc do AUSBC, mas chamada sem o USBMonitor
+    // registrado (o registro dele quebra no Android 12+ por causa de um
+    // PendingIntent sem FLAG_MUTABLE/IMMUTABLE). A permissão USB é pedida
+    // por este plugin, do jeito certo, e a câmera é aberta por reflexão —
+    // se algum nome da biblioteca mudar, o erro vira texto na Central, e o
+    // build nunca quebra por isso.
+    @Volatile private var uvcDireta: Any? = null
+    @Volatile private var uvcDiretaFalhou = ""
+    private var uvcDiretaTextura: SurfaceTexture? = null
+    private var uvcDiretaSuperficie: android.view.Surface? = null
+    private var uvcDiretaMonitor: Any? = null
+
     private val previewCallback = object : IPreviewDataCallBack {
         override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
             if (data == null) return
@@ -364,6 +376,11 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         } catch (t: Throwable) {
             linhas.add("USB: erro ${t.javaClass.simpleName}")
         }
+        linhas.add("UVC DIRETA: " + when {
+            uvcDireta != null -> "ABERTA"
+            uvcDiretaFalhou.isNotEmpty() -> "FALHOU — $uvcDiretaFalhou"
+            else -> "não tentada"
+        })
         linhas.add("PONTE: $cameraStatus")
         linhas.add("QUADROS: aceitos $cameraFramesAccepted • rejeitados $cameraFramesRejected • $lastCameraFrameFormat ${cameraFrameWidth}x${cameraFrameHeight}")
         return linhas.joinToString("\n")
@@ -492,6 +509,119 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         systemCameraTexture = null
     }
 
+    /** Abre a webcam pela libuvc SEM o USBMonitor registrado. */
+    private fun startDirectUvc(device: UsbDevice): Boolean {
+        if (uvcDireta != null) return true
+        val host = activity ?: return false
+        return try {
+            val cUvc = Class.forName("com.serenegiant.usb.UVCCamera")
+            val cMonitor = Class.forName("com.serenegiant.usb.USBMonitor")
+            val cOuvinte = Class.forName("com.serenegiant.usb.USBMonitor\$OnDeviceConnectListener")
+            val cBloco = Class.forName("com.serenegiant.usb.USBMonitor\$UsbControlBlock")
+            val ouvinte = java.lang.reflect.Proxy.newProxyInstance(
+                cOuvinte.classLoader, arrayOf(cOuvinte)
+            ) { _, _, _ -> null }
+            val monitor = cMonitor.getConstructor(Context::class.java, cOuvinte)
+                .newInstance(host.applicationContext, ouvinte)
+            uvcDiretaMonitor = monitor
+            val ctorBloco = cBloco.getDeclaredConstructor(cMonitor, UsbDevice::class.java)
+            ctorBloco.isAccessible = true
+            val bloco = ctorBloco.newInstance(monitor, device)
+            val uvc = cUvc.getDeclaredConstructor().newInstance()
+            cUvc.getMethod("open", cBloco).invoke(uvc, bloco)
+            // Tamanho: 640x480 em MJPEG; se a câmera recusar, YUYV.
+            val setSize = cUvc.getMethod("setPreviewSize", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            val mjpeg = try { cUvc.getField("FRAME_FORMAT_MJPEG").getInt(null) } catch (_: Throwable) { 1 }
+            val yuyv = try { cUvc.getField("FRAME_FORMAT_YUYV").getInt(null) } catch (_: Throwable) { 0 }
+            var largura = UVC_WIDTH
+            var altura = UVC_HEIGHT
+            val tentativas = listOf(
+                Triple(640, 480, mjpeg), Triple(640, 480, yuyv),
+                Triple(1280, 720, mjpeg), Triple(320, 240, yuyv)
+            )
+            var ok = false
+            var ultimo = ""
+            for ((w, h, modo) in tentativas) {
+                try {
+                    setSize.invoke(uvc, w, h, modo)
+                    largura = w; altura = h; ok = true
+                    break
+                } catch (t: Throwable) {
+                    ultimo = (t.cause ?: t).message ?: t.javaClass.simpleName
+                }
+            }
+            if (!ok) throw IllegalStateException("tamanho recusado: $ultimo")
+            // Superfície de mentira para o pipeline nativo andar.
+            val textura = SurfaceTexture(43)
+            textura.setDefaultBufferSize(largura, altura)
+            val superficie = android.view.Surface(textura)
+            uvcDiretaTextura = textura
+            uvcDiretaSuperficie = superficie
+            try {
+                cUvc.getMethod("setPreviewDisplay", android.view.Surface::class.java).invoke(uvc, superficie)
+            } catch (_: NoSuchMethodException) {
+                cUvc.getMethod("setPreviewTexture", SurfaceTexture::class.java).invoke(uvc, textura)
+            }
+            // Quadros em NV21 pelo IFrameCallback, convertidos aqui.
+            val cQuadro = Class.forName("com.serenegiant.usb.IFrameCallback")
+            val nv21 = try { cUvc.getField("PIXEL_FORMAT_NV21").getInt(null) } catch (_: Throwable) { 5 }
+            val w = largura
+            val h = altura
+            val retorno = java.lang.reflect.Proxy.newProxyInstance(
+                cQuadro.classLoader, arrayOf(cQuadro)
+            ) { _, metodo, args ->
+                if (metodo.name == "onFrame" && args != null && args.isNotEmpty()) {
+                    val buf = args[0] as? java.nio.ByteBuffer
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (buf != null && now - lastCameraFrameAt >= UVC_MIN_FRAME_INTERVAL_MS) {
+                        val bytes = ByteArray(buf.remaining())
+                        buf.get(bytes)
+                        if (bytes.size >= w * h * 3 / 2) {
+                            val rgba = nv21ToRgba(bytes, w, h)
+                            synchronized(cameraFrameLock) {
+                                latestRgbaFrame = rgba
+                                cameraFrameWidth = w
+                                cameraFrameHeight = h
+                                lastCameraFrameAt = now
+                                lastCameraFrameFormat = "UVC_DIRETA_NV21"
+                                cameraFramesAccepted++
+                            }
+                            cameraStatus = "CÂMERA USB AO VIVO — ${w}x${h}"
+                        } else {
+                            cameraFramesRejected++
+                        }
+                    }
+                }
+                null
+            }
+            cUvc.getMethod("setFrameCallback", cQuadro, Int::class.javaPrimitiveType).invoke(uvc, retorno, nv21)
+            cUvc.getMethod("startPreview").invoke(uvc)
+            uvcDireta = uvc
+            uvcDiretaFalhou = ""
+            cameraStatus = "WEBCAM USB ABERTA DIRETO (${largura}x${altura}) — AGUARDANDO QUADROS"
+            true
+        } catch (t: Throwable) {
+            val causa = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
+            uvcDiretaFalhou = "${causa.javaClass.simpleName}: ${causa.message ?: ""}"
+            cameraStatus = "UVC DIRETA FALHOU — $uvcDiretaFalhou"
+            stopDirectUvc()
+            false
+        }
+    }
+
+    private fun stopDirectUvc() {
+        val uvc = uvcDireta
+        uvcDireta = null
+        if (uvc != null) {
+            try { uvc.javaClass.getMethod("stopPreview").invoke(uvc) } catch (_: Throwable) { }
+            try { uvc.javaClass.getMethod("destroy").invoke(uvc) } catch (_: Throwable) { }
+        }
+        try { uvcDiretaSuperficie?.release() } catch (_: Throwable) { }
+        try { uvcDiretaTextura?.release() } catch (_: Throwable) { }
+        uvcDiretaSuperficie = null
+        uvcDiretaTextura = null
+    }
+
     /** Abre a UVC de verdade. CameraServer sozinho não publica webcams USB
      * em várias TV boxes; esta ponte entrega o RGBA diretamente ao Godot. */
     @UsedByGodot
@@ -501,6 +631,20 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         // direta NÃO é aberta: as duas brigariam pelo mesmo aparelho.
         if (systemCamera != null || (systemCameraTried && !systemCameraFailed)) return true
         if (startSystemCamera(host)) return true
+        // 2º: a UVC direta, com a permissão USB já concedida a este plugin.
+        if (uvcDireta != null) return true
+        if (uvcDiretaFalhou.isEmpty()) {
+            val webcam = try { uvcCameras().firstOrNull() } catch (_: Throwable) { null }
+            if (webcam != null && usbManager.hasPermission(webcam)) {
+                cameraWorker.execute { startDirectUvc(webcam) }
+                return true
+            }
+            if (webcam != null) {
+                // Sem permissão ainda: `requestUsbCameraAccess` pede e volta aqui.
+                return true
+            }
+        }
+        // 3º: o caminho antigo do AUSBC, de reserva.
         host.runOnUiThread {
             try {
                 if (cameraClient == null) {
@@ -526,6 +670,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     fun stopUvcCamera() {
         val host = activity
         stopSystemCamera()
+        stopDirectUvc()
         val action = {
             closeActiveCamera()
             try { cameraClient?.unRegister() } catch (_: Throwable) { }
@@ -673,7 +818,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
 
     @UsedByGodot
     fun getUsbCameraStatus(): String {
-        if (activeCamera != null || systemCamera != null || systemCameraTried) return cameraStatus
+        if (activeCamera != null || systemCamera != null || systemCameraTried || uvcDireta != null || uvcDiretaFalhou.isNotEmpty()) return cameraStatus
         val cameras = try { uvcCameras() } catch (_: Throwable) { emptyList() }
         if (cameras.isEmpty()) return "NENHUMA WEBCAM USB/UVC DETECTADA"
         val allowed = cameras.count { usbManager.hasPermission(it) }
