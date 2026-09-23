@@ -38,8 +38,22 @@ set "GODOT_ANDROID_KEYSTORE_RELEASE_USER=androiddebugkey"
 set "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=android"
 
 if not exist "build\android" mkdir "build\android"
+if exist "build\android\PunchChallenge.apk" del /q "build\android\PunchChallenge.apk"
+
+rem IMPORTAR ANTES DE EXPORTAR. Quando uma fonte ou imagem muda, o Godot
+rem reimporta tudo no inicio da exportacao e, no Windows, pode fechar no
+rem meio disso sem criar o APK. Com a importacao feita num passo proprio
+rem (e repetida uma vez, se cair), a exportacao ja encontra tudo pronto.
+echo Importando recursos do projeto...
+"%~1" --headless --path "%CD%" --import
+"%~1" --headless --path "%CD%" --import
+
+echo Gerando o APK...
 "%~1" --headless --path "%CD%" --export-release "Android" "build\android\PunchChallenge.apk"
-if errorlevel 1 exit /b 5
+if not exist "build\android\PunchChallenge.apk" (
+  echo O Godot fechou antes de terminar. Tentando mais uma vez...
+  "%~1" --headless --path "%CD%" --export-release "Android" "build\android\PunchChallenge.apk"
+)
 if not exist "build\android\PunchChallenge.apk" (
   echo ERRO: o Godot terminou sem criar o APK.
   exit /b 6
