@@ -782,6 +782,19 @@ var logo: Texture2D = null
 ## A janela 3D. Ver `scripts/arena/arena3d.gd`.
 @onready var arena: Arena3D = $Arena
 
+func _enter_tree() -> void:
+	# O pai entra antes dos filhos. Definir aqui o retângulo vertical garante
+	# que Fundo, Moldura, Arena e demais Controls já nasçam em 1080x1920.
+	if OS.get_name() == "Android":
+		anchor_left = 0.0
+		anchor_top = 0.0
+		anchor_right = 0.0
+		anchor_bottom = 0.0
+		size = TELA
+		pivot_offset = Vector2.ZERO
+		rotation = -PI * 0.5
+		position = Vector2(0.0, 1080.0)
+
 func _ready() -> void:
 	_configurar_enquadramento_universal()
 	# TV Boxes modestas nao devem descobrir o teto de efeitos no primeiro
@@ -843,15 +856,45 @@ func _ready() -> void:
 ## jogo ocupa todos os pixels, sem a moldura que a primeira correção criou.
 ## Em outra proporção, `KEEP` preserva o desenho sem zoom, corte ou deformação.
 func _configurar_enquadramento_universal() -> void:
+	# Na Smart Pro o jogo vive num SubViewport vertical e a cena externa gira
+	# o quadro inteiro. Alterar a Window aqui recolocaria o Android no modo de
+	# compatibilidade pequeno que este adaptador existe para evitar.
+	if get_viewport() is SubViewport:
+		pivot_offset = Vector2.ZERO
+		scale = Vector2.ONE
+		position = Vector2.ZERO
+		return
 	var janela := get_window()
 	if janela != null:
-		janela.content_scale_size = Vector2i(int(TELA.x), int(TELA.y))
+		if OS.get_name() == "Android":
+			# A Smart Pro recusa um framebuffer 1080x1920 e o reduz no centro.
+			# Mantemos a Window em 1920x1080 e giramos esta cena 1080x1920.
+			janela.content_scale_size = Vector2i(1920, 1080)
+		else:
+			janela.content_scale_size = Vector2i(int(TELA.x), int(TELA.y))
 		janela.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 		janela.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
 		janela.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_FRACTIONAL
 	pivot_offset = Vector2.ZERO
 	scale = Vector2.ONE
-	position = Vector2.ZERO
+	if OS.get_name() == "Android":
+		# 1080x1920 rotacionado -90 graus ocupa exatamente 1920x1080.
+		anchor_left = 0.0
+		anchor_top = 0.0
+		anchor_right = 0.0
+		anchor_bottom = 0.0
+		size = TELA
+		rotation = -PI * 0.5
+		position = Vector2(0.0, 1080.0)
+	else:
+		rotation = 0.0
+		position = Vector2.ZERO
+
+func _ponto_da_tela_para_o_jogo(ponto: Vector2) -> Vector2:
+	if OS.get_name() == "Android":
+		# Inversa de: tela = (jogo.y, 1080 - jogo.x).
+		return Vector2(TELA.x - ponto.y, ponto.x)
+	return ponto
 
 ## PÕE O LUTADOR NA ARENA.
 ##
@@ -1628,9 +1671,9 @@ func _input(event: InputEvent) -> void:
 
 	if central_aberta and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if calib_ativo:
-			_click_calibracao(event.position)
+			_click_calibracao(_ponto_da_tela_para_o_jogo(event.position))
 		else:
-			_click_central(event.position)
+			_click_central(_ponto_da_tela_para_o_jogo(event.position))
 
 ## OS ATALHOS DE TECLADO (5/C PARA CRÉDITO, 1/ENTER PARA START) SÃO
 ## FERRAMENTA DE TÉCNICO, NUNCA DE SALÃO.
@@ -1995,19 +2038,7 @@ func _registrar_impacto(
 	var receita := ImpactDirector.golpe(fx, alvo, pancada_nivel, CORES_FESTA)
 	tremor = float(receita["tremor"])
 	clarao = float(receita["clarao"])
-	# O HIT-STOP ENCURTA NA TV BOX, e este é o segundo "travamento" que
-	# não era defeito nenhum: é um congelamento DE PROPÓSITO, o soluço
-	# que dá peso ao golpe. No SOCO PERFEITO ele vale 360 ms.
-	#
-	# Num monitor de PC a 60 quadros isso lê como impacto. Numa TV box a
-	# 30, somado ao quadro pesado do próprio golpe, lê como a máquina
-	# travando — que foi exatamente a queixa. O gesto continua existindo,
-	# com um terço do tempo: o bastante para o olho sentir a pancada, e
-	# pouco o bastante para ninguém achar que o jogo morreu.
-	var congela := float(receita["hitstop"])
-	if OS.has_feature("mobile"):
-		congela = minf(congela * 0.34, 0.12)
-	hitstop_left = congela
+	hitstop_left = float(receita["hitstop"])
 	zoom_alvo = float(receita["zoom"])
 	zoom_impacto = float(receita["zoom"])
 	pancada_tempo = 0.0

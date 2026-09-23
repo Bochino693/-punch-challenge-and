@@ -29,3 +29,4 @@ __pycache__/
 *.pck
 *.zip
 final_project/
+/tools/android_usb_plugin/.gradle/

@@ -24,11 +24,13 @@ config/icon="res://assets/icon.png"
 
 [display]
 
-window/size/viewport_width=1080
-window/size/viewport_height=1920
+window/size/viewport_width=1920
+window/size/viewport_height=1080
 window/size/mode=3
 window/stretch/mode="canvas_items"
-window/handheld/orientation=6
+; SENSOR respeita a rotacao configurada na TV Box e evita o modo de
+; compatibilidade que desenhava um aplicativo de telefone pequeno no centro.
+window/handheld/orientation=0
 vsync/vsync_mode=2
 
 [editor_plugins]

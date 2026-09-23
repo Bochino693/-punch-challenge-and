@@ -219,18 +219,14 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     }
 
     /**
-     * Coloca a Activity em tela cheia real e mantém retrato nas TVs verticais.
-     * SENSOR_PORTRAIT aceita as duas posições verticais, mas nunca gira o jogo
-     * para paisagem nem o coloca na pequena janela de compatibilidade.
+     * A Smart Pro só oferece framebuffer horizontal em tela cheia. A Activity
+     * permanece em paisagem e a cena principal gira seu canvas internamente.
      */
     @UsedByGodot
     fun prepareAndroidKiosk(): Boolean {
         val host = activity ?: return fail("tela Android ainda não está disponível")
         host.runOnUiThread {
-            // TV boxes normalmente não possuem sensor de rotação. Forçar
-            // SENSOR_PORTRAIT faz alguns firmwares Android 10 criarem uma
-            // janela de compatibilidade pequena. Respeita a rotação do sistema.
-            host.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            host.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             host.window.addFlags(
                 WindowManager.LayoutParams.FLAG_FULLSCREEN or
                     WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or

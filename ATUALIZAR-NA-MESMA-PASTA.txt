@@ -1,4 +1,4 @@
-PUNCH CHALLENGE ANDROID - CORRECAO 1.0.60
+PUNCH CHALLENGE ANDROID - CORRECAO 1.0.64
 
 PASTA QUE DEVE SER MANTIDA:
 C:\Users\LAZER GAMES\Documents\punch-finally-android\PunchChallenge-Android-TVBox
@@ -16,12 +16,17 @@ O gerador agora instala o modelo Android diretamente, sem abrir o editor
 Godot na etapa que estava encerrando com signal 11. Ele tambem apaga qualquer
 APK antigo antes de compilar, para nunca confundir uma versao velha com a nova.
 
-A versao 1.0.60 tambem impede o AUSBC de procurar immersionbar 3.0.0 e
+A versao 1.0.64 tambem impede o AUSBC de procurar immersionbar 3.0.0 e
 webpdecoder 1.6.4.9.0, dependencias opcionais antigas que nao sao usadas pelo
 jogo e nao estao mais disponiveis nos repositorios configurados. A exclusao
 vale para o projeto raiz do Gradle e para todos os subprojetos.
 
-CAMERA 1.0.60:
+CAMERA E TELA 1.0.64:
+- executa scenes/main.tscn diretamente, sem SubViewport e sem travar a abertura;
+- abre o framebuffer 1920x1080 aceito pela Smart Pro em tela cheia;
+- gira a cena 1080x1920 dentro do proprio jogo para preencher o painel vertical;
+- corrige as coordenadas de mouse e toque depois da rotacao;
+- nao depende de aplicativo externo de rotacao;
 - cria uma superficie UVC real de 640x480 atras do Godot;
 - aceita quadros RGBA e NV21 e os envia ao Godot;
 - se o firmware nao entrega callback, copia os pixels da superficie UVC;
