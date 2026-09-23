@@ -42,7 +42,7 @@ if (Test-Path $ApkEsperado) {
     Remove-Item -LiteralPath $ApkEsperado -Force
 }
 
-Write-Host "Projeto confirmado: Punch Challenge Android 1.0.75 / REFINADO" -ForegroundColor Green
+Write-Host "Projeto confirmado: Punch Challenge Android 1.0.76 / REFINADO" -ForegroundColor Green
 
 if (-not (Test-Path "$env:ANDROID_HOME\platform-tools\adb.exe")) {
     throw "SDK Android invalido em C:\AndroidSdk. Falta platform-tools\adb.exe."

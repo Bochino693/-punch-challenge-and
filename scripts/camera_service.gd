@@ -78,6 +78,14 @@ var _ultima_quantidade_feeds := -1
 var _android_bridge = null
 var _proxima_permissao_usb_ms := 0
 var _uvc_texture: ImageTexture = null
+## A WEBCAM ENTRA E SAI A QUALQUER HORA, COMO O ARDUINO. Sem quadro por
+## alguns segundos, a ponte é parada e aberta de novo — de tempos em
+## tempos, até a câmera voltar. Tudo assíncrono do lado do plugin.
+const RELIGAR_SEM_QUADRO_MS := 4000
+var _uvc_quadro_ms := 0
+var _uvc_proximo_religar_ms := 0
+var _uvc_parada := false
+var _uvc_teve_video := false
 var _proxima_leitura_uvc_ms := 0
 ## Cadência de leitura da webcam, em ms. O jogo muda conforme a tela:
 ## rápida só quando a imagem aparece (ver `definir_ritmo`).
@@ -185,6 +193,7 @@ func _process(_delta: float) -> void:
 	if not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
 		return
 	var agora := Time.get_ticks_msec()
+	_vigiar_webcam_android(agora)
 	# Em muitas TV boxes a webcam recebe permissão, mas nunca aparece no
 	# CameraServer. O plugin Android abre UVC nativamente e mantém somente o
 	# quadro mais recente; ler aqui não cria fila nem segura o impacto.
@@ -219,9 +228,34 @@ func iniciar_captura() -> void:
 	_iniciar_uvc_android()
 	_descobrir_cameras(false)
 
+func _vigiar_webcam_android(agora: int) -> void:
+	if OS.get_name() != "Android" or _android_bridge == null or not _ponte_tem("startUvcCamera"):
+		return
+	if _feed != null:
+		return  # quem cuida da câmera é o CameraServer
+	var paciencia := maxi(RELIGAR_SEM_QUADRO_MS, intervalo_uvc_ms * 2 + 1500)
+	if _uvc_quadro_ms > 0 and agora - _uvc_quadro_ms < paciencia:
+		return
+	if agora < _uvc_proximo_religar_ms:
+		return
+	if _uvc_parada:
+		_uvc_parada = false
+		_uvc_proximo_religar_ms = agora + 6000
+		_android_bridge.call("startUvcCamera")
+		_requisitar_webcam_usb_android(true)
+	else:
+		_uvc_parada = true
+		_uvc_proximo_religar_ms = agora + 1500
+		_android_bridge.call("stopUvcCamera")
+		if _uvc_teve_video:
+			status = "CÂMERA DESCONECTADA — RECONECTE A WEBCAM"
+			estado = Estado.SUBINDO
+
 func _iniciar_uvc_android() -> void:
 	if OS.get_name() != "Android" or _android_bridge == null:
 		return
+	_uvc_proximo_religar_ms = Time.get_ticks_msec() + 8000
+	_uvc_parada = false
 	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
 		return
 	if _ponte_tem("startUvcCamera"):
@@ -246,6 +280,8 @@ func _amostrar_uvc_android(agora: int) -> bool:
 	var altura := int(_android_bridge.call("getUvcFrameHeight"))
 	if largura <= 0 or altura <= 0 or dados.size() != largura * altura * 4:
 		return false
+	_uvc_quadro_ms = agora
+	_uvc_teve_video = true
 	var imagem := Image.create_from_data(largura, altura, false, Image.FORMAT_RGBA8, dados)
 	if imagem == null or imagem.is_empty():
 		return false

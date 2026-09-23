@@ -106,7 +106,7 @@ Adafruit_NeoPixel fitaDir(LEDS_POR_FITA, PIN_FITA_DIR, NEO_GRB + NEO_KHZ800);
 char polaridade = 'A';
 float larguraM = 0.020f;
 float velocidadeMin = 1.33f;   // 20 mm em 15 ms: bloqueio mais lento nao e soco
-float velocidadeMax = 6.20f;
+float velocidadeMax = 8.00f;
 unsigned long pulsoMinUs = 700;
 const unsigned long PULSO_MAX_US = 300000;
 const unsigned long TEMPO_MORTO_MS = 1200;

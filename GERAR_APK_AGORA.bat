@@ -4,7 +4,7 @@ title Punch Challenge - Gerar APK Android
 cd /d "%~dp0"
 
 echo ============================================================
-echo   PUNCH CHALLENGE ANDROID 1.0.75
+echo   PUNCH CHALLENGE ANDROID 1.0.76
 echo   CAMERA UVC + ARDUINO USB + RETRATO TELA CHEIA
 echo ============================================================
 echo.

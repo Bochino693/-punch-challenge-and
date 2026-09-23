@@ -51,17 +51,17 @@ const PONTOS_DE_REFERENCIA := 5000
 ## O CONTRASTE. 1,0 é a resposta neutra depois da ancoragem.
 const CONTRASTE_MIN := 0.70
 const CONTRASTE_MAX := 1.80
-const DEFAULT_CONTRASTE := 1.10
+const DEFAULT_CONTRASTE := 1.70
 
 const DEFAULT_DEAD_ZONE := 0.0
 const DEFAULT_MIN_SPEED := 0.30
-const DEFAULT_MAX_SPEED := 6.20
+const DEFAULT_MAX_SPEED := 8.00
 
 ## Onde o soco de referência cai dentro da faixa, quando ninguém disse.
 ## Um pouco acima do meio: a metade de baixo da faixa é ocupada por
 ## socos de teste, de criança e de quem está só passando, e a de cima
 ## pelos socos que a máquina existe para medir.
-const REFERENCIA_PADRAO := 0.72
+const REFERENCIA_PADRAO := 0.565
 ## Até onde a âncora pode andar. Encostada demais numa ponta, a curva
 ## vira uma parede de um lado e um chão do outro.
 const REFERENCIA_MIN := 0.22
@@ -84,6 +84,25 @@ const REFERENCIA_AUTOMATICA := 0.0
 ## aleatoriedade nunca aumenta um golpe menor. Nos outros 999 casos ele
 ## continua sendo extraordinário, mas fica um ponto abaixo da perfeição.
 const CHANCE_PERFEITA := 1000
+
+## O SOCO DE VERDADE NUNCA DÁ O MESMO NÚMERO DUAS VEZES.
+##
+## A curva diz o valor "de tabela"; em cima dele entra uma variação de
+## uns 6% para cada lado (dois sorteios somados: perto do centro é o mais
+## comum, as pontas são raras). Acima de 8000 a subida fica mais cara: o
+## que passa de 8000 é pago só em parte, por sorteio. O teto (9999 de
+## tabela) fica como está, para o sorteio do perfeito continuar valendo.
+const VARIACAO := 0.06
+const LIMIAR_DIFICIL := 8000
+
+static func variar(pontos: int, a: float, b: float, c: float) -> int:
+	if pontos <= 0 or pontos >= GameDef.SCORE_MAX:
+		return pontos
+	var fator := 1.0 + (a + b - 1.0) * VARIACAO * 2.0
+	var nota := float(pontos) * fator
+	if nota > LIMIAR_DIFICIL:
+		nota = LIMIAR_DIFICIL + (nota - LIMIAR_DIFICIL) * lerpf(0.45, 1.0, c)
+	return clampi(int(round(nota)), 1, GameDef.SCORE_MAX - 1)
 
 static func aplicar_perfeito_raro(pontos: int, sorteio: int) -> int:
 	var nota := clampi(pontos, 0, GameDef.SCORE_MAX)

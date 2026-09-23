@@ -371,15 +371,22 @@ static func _mancha_redonda() -> GradientTexture2D:
 
 
 func instalar() -> bool:
-	# O LUTADOR 3D: malha com volume e esqueleto (ver `LutadorModelo3D`).
-	var modelo := LutadorModelo3D.new()
-	modelo.name = "Lutador"
-	modelo.position.y = PISO_DO_LUTADOR
-	_mundo.add_child(modelo)
-	modelo.montar()
-	lutador = modelo
+	# O LUTADOR 3D. Primeiro o guerreiro humano com animações próprias
+	# (`LutadorAnimado3D`); se o arquivo dele faltar, o Vanguard posado em
+	# código (`LutadorModelo3D`).
+	for tipo in [LutadorAnimado3D, LutadorModelo3D]:
+		var modelo: Lutador3D = tipo.new()
+		modelo.name = "Lutador"
+		modelo.position.y = PISO_DO_LUTADOR
+		_mundo.add_child(modelo)
+		modelo.montar()
+		if modelo.completo():
+			lutador = modelo
+			break
+		_mundo.remove_child(modelo)
+		modelo.queue_free()
 	_montar_sombra()
-	return lutador.completo()
+	return lutador != null and lutador.completo()
 
 
 func _montar_sombra() -> void:

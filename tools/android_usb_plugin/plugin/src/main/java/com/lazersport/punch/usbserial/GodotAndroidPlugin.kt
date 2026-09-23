@@ -41,6 +41,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     SerialInputOutputManager.Listener {
 
     companion object {
+        private const val CAMERA_COUNT_TTL_MS = 1500L
         private const val ACTION_USB_PERMISSION = "com.lazersport.punch.USB_PERMISSION"
         private const val CAMERA_PERMISSION_REQUEST = 9041
         private const val WRITE_TIMEOUT_MS = 250
@@ -62,6 +63,13 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     private val partialLine = StringBuilder()
     private val writer = Executors.newSingleThreadExecutor()
     private val cameraWorker = Executors.newSingleThreadExecutor()
+    /** Consultas ao serviço de câmera do Android, que podem demorar segundos
+     * enquanto o USB se reorganiza (webcam entrando ou saindo). Nunca na
+     * thread do jogo nem na da interface. */
+    private val infoWorker = Executors.newSingleThreadExecutor()
+    @Volatile private var cachedCameraCount = 0
+    @Volatile private var cameraCountAt = 0L
+    private val countInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private val serialPermissionRequested = mutableSetOf<Int>()
     private val cameraPermissionRequested = mutableSetOf<Int>()
     @Volatile private var serialPort: UsbSerialPort? = null
@@ -390,8 +398,25 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     @UsedByGodot
     fun getSystemCameraCount(): Int = if (systemCameraFailed) 0 else systemCameraCount()
 
+    /** A contagem vem da memória e é renovada em segundo plano: quem
+     * pergunta nunca espera o serviço de câmera responder. */
+    private fun systemCameraCount(): Int {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - cameraCountAt > CAMERA_COUNT_TTL_MS && countInFlight.compareAndSet(false, true)) {
+            infoWorker.execute {
+                try {
+                    cachedCameraCount = realSystemCameraCount()
+                } finally {
+                    cameraCountAt = android.os.SystemClock.elapsedRealtime()
+                    countInFlight.set(false)
+                }
+            }
+        }
+        return cachedCameraCount
+    }
+
     @Suppress("DEPRECATION")
-    private fun systemCameraCount(): Int = try {
+    private fun realSystemCameraCount(): Int = try {
         android.hardware.Camera.getNumberOfCameras()
     } catch (_: Throwable) {
         0
@@ -630,6 +655,13 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         // 1º: a câmera do sistema (API clássica). Se ela existe, a UVC
         // direta NÃO é aberta: as duas brigariam pelo mesmo aparelho.
         if (systemCamera != null || (systemCameraTried && !systemCameraFailed)) return true
+        if (cameraCountAt == 0L) {
+            // Ainda sem a primeira contagem: ela está sendo feita em segundo
+            // plano. O jogo chama de novo em instantes.
+            systemCameraCount()
+            cameraStatus = "PROCURANDO CÂMERA…"
+            return true
+        }
         if (startSystemCamera(host)) return true
         // 2º: a UVC direta, com a permissão USB já concedida a este plugin.
         if (uvcDireta != null) return true
@@ -643,6 +675,12 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                 // Sem permissão ainda: `requestUsbCameraAccess` pede e volta aqui.
                 return true
             }
+        }
+        // Nada plugado: não há o que abrir. O jogo tenta de novo sozinho,
+        // e a webcam é puxada assim que for conectada.
+        if (uvcCameras().isEmpty()) {
+            cameraStatus = "NENHUMA WEBCAM USB CONECTADA"
+            return true
         }
         // 3º: o caminho antigo do AUSBC, de reserva.
         host.runOnUiThread {
@@ -669,8 +707,15 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     @UsedByGodot
     fun stopUvcCamera() {
         val host = activity
-        stopSystemCamera()
-        stopDirectUvc()
+        // Parar também zera as falhas: a webcam pode ter sido trocada ou
+        // reconectada, e a próxima abertura merece tentar tudo de novo.
+        systemCameraFailed = false
+        uvcDiretaFalhou = ""
+        cameraCountAt = 0L
+        // Soltar a câmera pode demorar: sempre na thread de quem a abriu.
+        val cameraThread = systemCameraThread
+        if (cameraThread != null) Handler(cameraThread.looper).post { stopSystemCamera() } else stopSystemCamera()
+        cameraWorker.execute { stopDirectUvc() }
         val action = {
             closeActiveCamera()
             try { cameraClient?.unRegister() } catch (_: Throwable) { }

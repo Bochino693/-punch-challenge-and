@@ -5,7 +5,15 @@ O adversario agora e um boneco 3D de verdade (malha com volume e esqueleto),
 e nao mais desenhos 2D. A animacao (guarda, ginga, jab-direto, reacao ao
 golpe, nocaute e levantar) e feita pelo jogo em cima dos ossos.
 
-MODELO DE FABRICA
+LUTADOR PRINCIPAL (v76)
+  assets/lutador3d/barbaro.glb  -  o Barbaro do pacote "KayKit Adventurers"
+  (Kay Lousberg, licenca CC0: uso livre, inclusive comercial, ver
+  LICENCA_BARBARO_KAYKIT_CC0.txt). Humano, com textura e ANIMACOES
+  PROPRIAS: guarda de punhos, golpe recebido, queda, levantar da lona e
+  comemoracao. O jogo esconde as armas e poe as luvas vermelhas.
+  Se este arquivo for apagado, o jogo usa o lutador.glb abaixo.
+
+MODELO RESERVA
   assets/lutador3d/lutador.glb  (Vanguard da Mixamo, com textura, uso
   livre em jogos), com luvas vermelhas colocadas pelo jogo.
   Qualquer exportacao da Mixamo serve: o jogo mede sozinho para onde o

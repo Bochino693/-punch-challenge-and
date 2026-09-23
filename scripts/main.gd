@@ -213,6 +213,13 @@ const ABA_RECT := Rect2(80, 250, 920, 62)
 
 var state: GameDef.State = GameDef.State.IDLE
 var central_aberta := false
+## SEGURAR OK NA ABERTURA ABRE A CENTRAL. Um toque não faz nada; seis
+## segundos segurando mostram a contagem e entram nas configurações.
+## Soltar antes cancela. Assim o controle remoto basta para o técnico, e
+## ninguém entra na Central sem querer.
+const SEGURAR_OK_S := 6.0
+const TECLAS_OK := [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]
+var _ok_segurado := -1.0
 var game_mode := "credit"
 var credits := 0
 var plays := 0
@@ -307,9 +314,10 @@ const ESCALA_DO_SENSOR := 10
 ## máquina saturada no contraste máximo sem ninguém ter pedido, então a
 ## migração descarta os dois e recalcula a partir da faixa medida — que
 ## essa sim continua válida, porque foi medida no gabinete.
-## O 7 equilibra: teto 6,2 m/s, contraste 1,10 e âncora a 72% da faixa
-## (3 m/s ~ 860, 4 m/s ~ 2600, 5 m/s ~ 5500). O 6 pagava quase nada.
-const ESQUEMA_DA_PONTUACAO := 7
+## O 8 é o de soco de verdade: teto 8 m/s, contraste 1,70 e âncora a
+## 56,5% da faixa (3 m/s ~ 750, 4 ~ 2300, 5 ~ 4700, 6 ~ 7400, 7 ~ 9300),
+## mais a variação de `ScoreCurve.variar`. Passar de 8000 é para poucos.
+const ESQUEMA_DA_PONTUACAO := 8
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 ## O PULSO MÍNIMO EM MILISSEGUNDOS que a placa recebe no CONFIG.
@@ -495,6 +503,9 @@ var proximo_fogo := 0.0
 var tremor := 0.0
 var clarao := 0.0
 var notice := ""
+## Até quando a tela de espera mostra "MAIS FORTE!" no lugar da chamada:
+## o soco fraco demais não conta, e quem bateu precisa VER isso.
+var _fraco_ate := 0.0
 var notice_left := 0.0
 var confirm_action := ""
 var confirm_until := 0.0
@@ -802,6 +813,7 @@ func _enter_tree() -> void:
 		position = Vector2(0.0, 1080.0)
 
 func _ready() -> void:
+	_montar_camada_ok()
 	_configurar_enquadramento_universal()
 	# TV Boxes modestas nao devem descobrir o teto de efeitos no primeiro
 	# impacto. O Android nasce em MEDIO e ainda pode reduzir automaticamente.
@@ -1045,6 +1057,7 @@ func _process(delta: float) -> void:
 	# O impacto não suspende mais a UI, partículas e relógios da rodada.
 	# O clarão/tremor já comunicam a pancada sem congelar a tela inteira.
 	hitstop_left = maxf(0.0, hitstop_left - delta)
+	_contar_ok_segurado(delta)
 	# A gravação pendente sai assim que a anterior termina, e nunca no
 	# quadro em que ela foi pedida. Ver `SettingsStore.save_data_async`.
 	SettingsStore.bombear()
@@ -1670,9 +1683,19 @@ func _input(event: InputEvent) -> void:
 			_toggle_central()
 			get_viewport().set_input_as_handled()
 			return
+		if tecla in TECLAS_OK and not central_aberta and state == GameDef.State.IDLE:
+			if _ok_segurado < 0.0 and not event.echo:
+				_ok_segurado = 0.0
+			get_viewport().set_input_as_handled()
+			return
+		if central_aberta and calib_ativo and _navegar_calibracao(tecla, event.echo):
+			get_viewport().set_input_as_handled()
+			return
 		if central_aberta and not calib_ativo and _navegar_central_pelo_controle(tecla, event.echo):
 			get_viewport().set_input_as_handled()
 			return
+	if event is InputEventKey and not event.pressed and (event as InputEventKey).keycode in TECLAS_OK:
+		_ok_segurado = -1.0
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F9:
 			_toggle_central()
@@ -2229,7 +2252,31 @@ var calib_fortes: Array[float] = []
 var calib_sinais: Array[float] = []
 var calib_sugestao: Dictionary = {}
 
+## O ASSISTENTE PELO CONTROLE REMOTO. Os quatro botões são uma grade 2x2:
+## setas trocam de botão, OK aperta, Voltar cancela.
+const CALIB_ORDEM := ["calib_repetir", "calib_avancar", "calib_cancelar", "calib_salvar"]
+var _foco_calib := 1
+
+func _navegar_calibracao(tecla: Key, repetindo: bool) -> bool:
+	match tecla:
+		KEY_LEFT, KEY_RIGHT:
+			_foco_calib ^= 1
+		KEY_UP, KEY_DOWN:
+			_foco_calib ^= 2
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			if not repetindo:
+				_click_calibracao(CALIB_BOTOES[CALIB_ORDEM[_foco_calib]].get_center())
+		KEY_BACK, KEY_ESCAPE:
+			if not repetindo:
+				_fechar_calibracao()
+				_show_notice("CALIBRAÇÃO CANCELADA — NADA FOI MUDADO")
+		_:
+			return false
+	sons.play("tick", -12.0)
+	return true
+
 func _abrir_calibracao() -> void:
+	_foco_calib = 1
 	calib_ativo = true
 	calib_passo = 0
 	calib_repouso_left = CALIB_REPOUSO_S
@@ -2278,6 +2325,7 @@ func _calibracao_recebeu(velocidade: float, pico: float) -> void:
 			if calib_fortes.size() >= Calibracao.AMOSTRAS:
 				calib_passo = 3
 				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_ruido, sensor_raio)
+				_foco_calib = 3
 				sons.play("record", -6.0)
 
 func _click_calibracao(p: Vector2) -> void:
@@ -2296,6 +2344,7 @@ func _click_calibracao(p: Vector2) -> void:
 			calib_passo += 1
 			if calib_passo == 3:
 				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_ruido, sensor_raio)
+				_foco_calib = 3
 	elif CALIB_BOTOES["calib_salvar"].has_point(p):
 		if calib_sugestao.is_empty():
 			return
@@ -2364,6 +2413,11 @@ func _draw_calibracao() -> void:
 		not calib_sugestao.is_empty(), Paleta.VERDE, 18
 	)
 	_botao(CALIB_BOTOES["calib_cancelar"], "CANCELAR", false, Paleta.VERMELHO, 19)
+	var foco: Rect2 = CALIB_BOTOES[CALIB_ORDEM[_foco_calib]]
+	var pulso := 0.6 + 0.4 * sin(animation_time * 6.0)
+	draw_rect(foco.grow(6.0), Color(Paleta.AMBAR, 0.18 * pulso))
+	draw_rect(foco.grow(6.0), Color(Paleta.AMBAR, pulso), false, 5.0)
+	_rotulo("setas escolhem  •  OK aperta  •  VOLTAR cancela", 1566.0, Paleta.TINTA_FRACA)
 
 func _passo_de_golpes(titulo: String, dica: String, amostras: Array) -> void:
 	_texto_arcade(titulo, 600.0, 52, Color.WHITE, LARGURA_UTIL)
@@ -3348,6 +3402,13 @@ const RECUSAS := {
 func _recusa_da_placa(msg: Dictionary) -> void:
 	# Golpe recusado ainda é prova de que o sensor está vivo e medindo.
 	_sensor_apareceu()
+	# NA CALIBRAÇÃO, O SOCO FRACO É JUSTAMENTE O QUE SE QUER MEDIR. A placa
+	# recusa como FRACO tudo abaixo do piso em vigor — e o passo "golpes
+	# fracos" ficava esperando para sempre. Com velocidade medida, vira
+	# amostra.
+	if calib_ativo and central_aberta and str(msg["reason"]) == "FRACO" and float(msg["speed"]) > 0.0:
+		_calibracao_recebeu(float(msg["speed"]), float(msg["peak_g"]))
+		return
 	var motivo := str(msg["reason"])
 	ultima_recusa = "%s  •  %.1f g, %.0f ms, %.0f °/s, %.2f m/s" % [
 		motivo, float(msg["peak_g"]), float(msg["duration_ms"]),
@@ -3358,6 +3419,8 @@ func _recusa_da_placa(msg: Dictionary) -> void:
 	# fora daí a informação fica na Central, que é onde se regula.
 	if state == GameDef.State.ARMED and not central_aberta:
 		_show_notice(str(RECUSAS.get(motivo, "GOLPE RECUSADO: %s" % motivo)))
+		if motivo == "FRACO":
+			_fraco_ate = animation_time + 1.8
 
 func _receber_hit(msg: Dictionary) -> void:
 	# Golpe medido é a prova definitiva de que o sensor está lá, mesmo que
@@ -3457,6 +3520,7 @@ func _processar_golpe(
 	# No sensor real, só golpes que JÁ chegaram ao teto participam; um em
 	# mil recebe a perfeição e os demais ficam em 9998.
 	if not simulado:
+		pontos = ScoreCurve.variar(pontos, randf(), randf(), randf())
 		pontos = ScoreCurve.aplicar_perfeito_raro(
 			pontos, randi_range(0, ScoreCurve.CHANCE_PERFEITA - 1)
 		)
@@ -3468,6 +3532,7 @@ func _processar_golpe(
 			golpe_registrado = false
 			ultima_recusa = "fraco demais: %.2f m/s não chega à zona de pontuação" % speed
 		_show_notice("MAIS FORTE! ESSE NÃO CHEGOU A PONTUAR")
+		_fraco_ate = animation_time + 1.8
 		return
 	_registrar_impacto(pontos, speed, simulado, pico_g, duracao_ms)
 
@@ -3575,6 +3640,59 @@ func _teste_de_golpe() -> void:
 # ======================================================================
 # CENTRAL TÉCNICA (F9)
 # ======================================================================
+func _contar_ok_segurado(delta: float) -> void:
+	if _ok_segurado < 0.0:
+		return
+	if central_aberta or state != GameDef.State.IDLE:
+		_ok_segurado = -1.0
+		return
+	var antes := int(ceil(SEGURAR_OK_S - _ok_segurado))
+	_ok_segurado += delta
+	var agora := int(ceil(SEGURAR_OK_S - _ok_segurado))
+	if agora != antes and agora > 0 and _ok_segurado > 0.5:
+		sons.play("menu", -10.0)
+	if _ok_segurado >= SEGURAR_OK_S:
+		_ok_segurado = -1.0
+		_toggle_central()
+
+## A CONTAGEM DE ENTRADA NA CENTRAL: anel que fecha e o número no meio.
+## Desenhada numa camada própria, por cima do letreiro e de tudo mais.
+## Só aparece depois de meio segundo segurando — um toque não pisca nada.
+var _camada_ok: Node2D = null
+
+func _montar_camada_ok() -> void:
+	_camada_ok = Node2D.new()
+	_camada_ok.name = "ContagemDaCentral"
+	_camada_ok.z_index = 100
+	add_child(_camada_ok)
+	_camada_ok.draw.connect(_desenhar_ok_segurado)
+
+func _draw_ok_segurado() -> void:
+	if _camada_ok != null:
+		move_child(_camada_ok, get_child_count() - 1)
+		_camada_ok.queue_redraw()
+
+func _desenhar_ok_segurado() -> void:
+	if _ok_segurado < 0.5 or central_aberta:
+		return
+	var ci := _camada_ok
+	var aparece := clampf((_ok_segurado - 0.5) / 0.25, 0.0, 1.0)
+	ci.draw_rect(Rect2(Vector2.ZERO, TELA), Color(0.02, 0.0, 0.03, 0.92 * aparece))
+	var centro := Vector2(TELA.x * 0.5, 880.0)
+	var fracao := clampf(_ok_segurado / SEGURAR_OK_S, 0.0, 1.0)
+	Traco.arco(ci, centro, 190.0, Color(1, 1, 1, 0.12 * aparece), 18.0)
+	Traco.setor(ci, centro, 190.0, -PI * 0.5, -PI * 0.5 + TAU * fracao, Color(Paleta.AMBAR, aparece), 18.0)
+	var resta := int(ceil(SEGURAR_OK_S - _ok_segurado))
+	var pulso := 1.0 + 0.08 * (1.0 - fmod(_ok_segurado, 1.0))
+	ci.draw_set_transform(centro, 0.0, Vector2.ONE * pulso)
+	ci.draw_string(fonte, Vector2(-200.0, 62.0), str(resta), HORIZONTAL_ALIGNMENT_CENTER, 400.0, 170, Color(Paleta.CREME, aparece))
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	ci.draw_string(fonte, Vector2(0.0, 1170.0), "CONFIGURAÇÕES", HORIZONTAL_ALIGNMENT_CENTER, TELA.x, 52, Color(Paleta.AMBAR, aparece))
+	ci.draw_string(
+		fonte_texto, Vector2(0.0, 1236.0), "CONTINUE SEGURANDO OK  •  SOLTE PARA CANCELAR",
+		HORIZONTAL_ALIGNMENT_CENTER, TELA.x, _corpo(28), Color(Paleta.CREME, 0.85 * aparece)
+	)
+
 func _toggle_central() -> void:
 	if central_aberta:
 		_fechar_central()
@@ -4223,9 +4341,9 @@ func _carregar() -> void:
 			score_contraste = ScoreCurve.DEFAULT_CONTRASTE
 			score_ref_speed = ScoreCurve.REFERENCIA_AUTOMATICA
 			score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
-			if int(data.get("score_schema", 0)) == 6:
-				# O esquema 6 empurrou o teto para 7 m/s; volta ao padrão.
-				hit_max_speed = ScoreCurve.DEFAULT_MAX_SPEED
+			# O teto de cada esquema antigo era fácil demais para um jogo de
+			# soco: o do esquema 8 vale para todos.
+			hit_max_speed = maxf(hit_max_speed, ScoreCurve.DEFAULT_MAX_SPEED)
 			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
@@ -4234,6 +4352,9 @@ func _carregar() -> void:
 		# dia teria a escala errada — justamente o horário em que menos
 		# gente está olhando para consertar.
 		auto_escala.carregar(data.get("auto_escala", {}))
+		if _converteu_esquema:
+			# A memória da régua antiga puxaria o teto de volta para baixo.
+			auto_escala.esquecer()
 		sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 		# O PULSO MÍNIMO NÃO É LIDO DO DISCO, e isto é de propósito.
 		#
@@ -4354,6 +4475,7 @@ func _draw() -> void:
 	_draw_clarao()
 	_draw_alertas_graves()
 	_draw_transicao()
+	_draw_ok_segurado()
 
 	# A FAIXA DE AVISO SAIU DA TELA DO JOGO. Pedido explícito: um cartão
 	# de "CÂMERA CONECTADA" ou "CRÉDITO ADICIONADO" surgindo por cima da
@@ -4666,8 +4788,16 @@ func _draw_espera_do_soco() -> void:
 	)
 	var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
 	var chamada := "SOQUE AGORA!" if socos.is_empty() else "AGORA O SEGUNDO!"
-	_texto_arcade(chamada, 1412.0, 88, Color(Color.WHITE, piscada), LARGURA_UTIL)
-	_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1470.0, Color.WHITE)
+	var fraco := animation_time < _fraco_ate
+	if fraco:
+		var tremor := sin(animation_time * 60.0) * 6.0 * clampf(_fraco_ate - animation_time - 1.4, 0.0, 1.0)
+		draw_set_transform(Vector2(tremor, 0.0), 0.0, Vector2.ONE)
+		_texto_arcade("MAIS FORTE!", 1412.0, 96, Paleta.AMBAR, LARGURA_UTIL)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_rotulo("ESSE NÃO PONTUOU  •  BATA DE NOVO", 1470.0, Color.WHITE)
+	else:
+		_texto_arcade(chamada, 1412.0, 88, Color(Color.WHITE, piscada), LARGURA_UTIL)
+		_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1470.0, Color.WHITE)
 	# A PROVOCAÇÃO DA ARENA. Ela não repete a instrução de cima: a
 	# instrução diz o que fazer, esta diz por que vale a pena. É a voz do
 	# jogo, e é o que um cartaz de console antigo teria aqui.
