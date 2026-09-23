@@ -14,7 +14,8 @@ extends SubViewport
 ##   • partículas com quantidade fixa (mudar `amount` realoca buffers e
 ##     engasga) e shaders compilados no arranque (`aquecer`).
 
-const TELA_LOGICA := Vector2(784.0, 797.0)
+## Resolução cheia do quadro (1:1 na tela): o ringue sai nítido.
+const TELA_LOGICA := Vector2(980.0, 996.0)
 ## Degrau magro para quando o vigia de desempenho apertar.
 const FATOR_MAGRO := 0.75
 const DESCE_PARA_MAGRO := 0.50
@@ -370,11 +371,13 @@ static func _mancha_redonda() -> GradientTexture2D:
 
 
 func instalar() -> bool:
-	lutador = Lutador3D.new()
-	lutador.name = "Lutador"
-	lutador.position.y = PISO_DO_LUTADOR
-	_mundo.add_child(lutador)
-	lutador.montar()
+	# O LUTADOR 3D: malha com volume e esqueleto (ver `LutadorModelo3D`).
+	var modelo := LutadorModelo3D.new()
+	modelo.name = "Lutador"
+	modelo.position.y = PISO_DO_LUTADOR
+	_mundo.add_child(modelo)
+	modelo.montar()
+	lutador = modelo
 	_montar_sombra()
 	return lutador.completo()
 

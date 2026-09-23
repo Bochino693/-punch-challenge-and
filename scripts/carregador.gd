@@ -20,7 +20,7 @@ extends Node
 
 const CENA_DO_JOGO := "res://scenes/main.tscn"
 const PASTAS := ["res://assets/"]
-const EXTENSOES := ["png", "jpg", "webp", "svg", "wav", "ogg", "mp3", "ttf", "otf", "tres", "res"]
+const EXTENSOES := ["png", "jpg", "webp", "svg", "wav", "ogg", "mp3", "ttf", "otf", "tres", "res", "glb", "gltf", "fbx"]
 
 ## Mesma geometria do jogo: quadro lógico 1080x1920.
 const TELA := Vector2(1080.0, 1920.0)
@@ -232,13 +232,21 @@ func _desenhar() -> void:
 	_capsula(caixa, Color("2d0b15", aparece))
 	var cheio := Rect2(caixa.position, Vector2(maxf(altura, largura * _mostrado), altura))
 	_capsula(cheio, Color("ff1934", aparece), Color("ffdc27", aparece))
-	# Reflexo correndo por dentro do trecho cheio.
+	# O BRILHO FICA DENTRO DA BARRA. O reflexo correndo e a ponta acesa são
+	# cápsulas menores que o trecho cheio e recortadas pelas pontas dele —
+	# nada vaza para fora do trilho.
+	var raio_cheio := altura * 0.5
+	var dentro_ini := cheio.position.x + raio_cheio * 0.5
+	var dentro_fim := cheio.end.x - raio_cheio * 0.5
 	var brilho_x := fmod(_relogio * 420.0, cheio.size.x + 160.0) - 80.0
-	if brilho_x > 0.0 and brilho_x < cheio.size.x:
-		var bx := cheio.position.x + brilho_x
-		t.draw_rect(Rect2(bx - 30.0, topo + 2.0, 60.0, altura - 4.0), Color(1, 1, 1, 0.22 * aparece))
-	# Ponta acesa.
-	t.draw_circle(Vector2(cheio.end.x - altura * 0.5, topo + altura * 0.5), altura * 1.1, Color(1.0, 0.86, 0.15, 0.18 * aparece), true, -1.0, true)
+	var b0 := maxf(cheio.position.x + brilho_x - 34.0, dentro_ini)
+	var b1 := minf(cheio.position.x + brilho_x + 34.0, dentro_fim)
+	if b1 - b0 > 6.0:
+		_capsula(Rect2(b0, topo + 3.0, b1 - b0, altura - 6.0), Color(1, 1, 1, 0.30 * aparece))
+	# a ponta acesa, também por dentro
+	var p0 := maxf(dentro_fim - 40.0, dentro_ini)
+	if dentro_fim - p0 > 6.0:
+		_capsula(Rect2(p0, topo + 3.0, dentro_fim - p0, altura - 6.0), Color(1.0, 0.95, 0.6, 0.0), Color(1.0, 0.95, 0.6, 0.55 * aparece))
 
 	var pct := "%d%%" % int(round(_mostrado * 100.0))
 	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 74.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 40, Color("ffdc27", aparece))
@@ -249,6 +257,11 @@ func _desenhar() -> void:
 ## Retângulo com as pontas totalmente redondas, borda lisa, com gradiente
 ## horizontal opcional.
 func _capsula(r: Rect2, cor: Color, cor_fim: Color = Color(0, 0, 0, 0)) -> void:
+	# Mais estreita que alta, as duas pontas redondas se cruzariam e o
+	# polígono deixaria de ser válido: nesse caso vira um círculo.
+	if r.size.x <= r.size.y + 0.5:
+		_tela.draw_circle(r.get_center(), r.size.y * 0.5, cor.lerp(cor_fim, 0.5) if cor_fim.a > 0.0 else cor, true, -1.0, true)
+		return
 	var raio := r.size.y * 0.5
 	var pontos := PackedVector2Array()
 	var cores := PackedColorArray()

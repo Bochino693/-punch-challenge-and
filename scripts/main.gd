@@ -5349,6 +5349,9 @@ func _draw_central() -> void:
 	draw_rect(Rect2(45, 101, 990, CENTRAL_TOPO - 101.0), CENTRAL_FUNDO)
 	draw_rect(Rect2(45, CENTRAL_BASE, 990, 1881.0 - CENTRAL_BASE), CENTRAL_FUNDO)
 	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
+	# A VERSÃO À VISTA: é o primeiro número a conferir quando algo não bate
+	# com o que foi prometido — foto da Central já diz qual APK está rodando.
+	_texto("VERSÃO %d" % Versao.NUMERO, 204.0, 20, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 860.0)
 	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
 	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
 	_abas_da_central()

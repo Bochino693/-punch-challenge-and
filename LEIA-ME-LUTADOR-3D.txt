@@ -1,0 +1,21 @@
+PUNCH CHALLENGE - LUTADOR 3D
+============================
+
+O adversario agora e um boneco 3D de verdade (malha com volume e esqueleto),
+e nao mais desenhos 2D. A animacao (guarda, ginga, jab-direto, reacao ao
+golpe, nocaute e levantar) e feita pelo jogo em cima dos ossos.
+
+MODELO DE FABRICA
+  assets/lutador3d/lutador.glb  (X Bot da Mixamo, uso livre em jogos),
+  vestido como androide de treino: metal escuro, juntas acesas, luvas
+  vermelhas e calcao.
+
+PARA TROCAR POR OUTRO LUTADOR (ex.: um boxeador realista)
+  1. Entre em https://www.mixamo.com (gratis, conta Adobe).
+  2. Escolha um personagem (Characters). Nao precisa de animacao.
+  3. Download: Format FBX Binary ou glTF, Pose "T-pose", With Skin.
+  4. Se baixou FBX, abra no Blender e exporte como .glb (glTF Binary).
+  5. Substitua assets/lutador3d/lutador.glb pelo seu arquivo (mesmo nome).
+  6. Abra o projeto no Godot 4.6.1 uma vez e gere o APK normalmente.
+  O jogo usa o esqueleto "mixamorig" e anima sozinho: guarda, golpes e
+  nocaute continuam funcionando. As luvas vermelhas sao colocadas nas maos.
