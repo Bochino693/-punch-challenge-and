@@ -307,8 +307,9 @@ const ESCALA_DO_SENSOR := 10
 ## máquina saturada no contraste máximo sem ninguém ter pedido, então a
 ## migração descarta os dois e recalcula a partir da faixa medida — que
 ## essa sim continua válida, porque foi medida no gabinete.
-## O 6 endurece: teto 7 m/s, contraste 1,35 e âncora a 78% da faixa.
-const ESQUEMA_DA_PONTUACAO := 6
+## O 7 equilibra: teto 6,2 m/s, contraste 1,10 e âncora a 72% da faixa
+## (3 m/s ~ 860, 4 m/s ~ 2600, 5 m/s ~ 5500). O 6 pagava quase nada.
+const ESQUEMA_DA_PONTUACAO := 7
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 ## O PULSO MÍNIMO EM MILISSEGUNDOS que a placa recebe no CONFIG.
@@ -2135,7 +2136,7 @@ func _registrar_impacto(
 	# leva. Sem a segunda, o soco continuava soando como saco de areia
 	# mesmo com um lutador na tela levando o golpe.
 	sons.play("arena_corpo", -1.0 + forca_visual * 4.0)
-	if result_score >= 6000 and forca_visual >= 0.36 and not arena_nocaute:
+	if result_score >= 4000 and forca_visual >= 0.36 and not arena_nocaute:
 		sons.play("arena_publico", -11.0 + forca_visual * 8.0)
 	if arena_nocaute:
 		arena_frase = ArenaFrases.de_nocaute(arena_semente)
@@ -3341,7 +3342,7 @@ const RECUSAS := {
 	"LENTO": "SUBIDA LENTA — EMPURRÃO, NÃO IMPACTO",
 	"SUSTENTADO": "FORÇA SUSTENTADA — O SINAL NÃO CAIU",
 	"GIRO": "O ALVO NÃO SE MOVEU — BAIXE O GIRO MÍNIMO",
-	"FRACO": "ABAIXO DO PISO DE VELOCIDADE",
+	"FRACO": "MAIS FORTE! SOCO LENTO NÃO CONTA",
 }
 
 func _recusa_da_placa(msg: Dictionary) -> void:
@@ -3462,7 +3463,11 @@ func _processar_golpe(
 	ultima_velocidade = speed
 	ultima_nota = pontos
 	if pontos <= 0:
-		_show_notice("MOVIMENTO ABAIXO DA ZONA DE PONTUAÇÃO")
+		# Fraco demais não gasta a tentativa: o jogador bate de novo.
+		if not simulado:
+			golpe_registrado = false
+			ultima_recusa = "fraco demais: %.2f m/s não chega à zona de pontuação" % speed
+		_show_notice("MAIS FORTE! ESSE NÃO CHEGOU A PONTUAR")
 		return
 	_registrar_impacto(pontos, speed, simulado, pico_g, duracao_ms)
 
@@ -4218,7 +4223,9 @@ func _carregar() -> void:
 			score_contraste = ScoreCurve.DEFAULT_CONTRASTE
 			score_ref_speed = ScoreCurve.REFERENCIA_AUTOMATICA
 			score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
-			hit_max_speed = maxf(hit_max_speed, ScoreCurve.DEFAULT_MAX_SPEED)
+			if int(data.get("score_schema", 0)) == 6:
+				# O esquema 6 empurrou o teto para 7 m/s; volta ao padrão.
+				hit_max_speed = ScoreCurve.DEFAULT_MAX_SPEED
 			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
@@ -5390,6 +5397,8 @@ func _ranking_anuncio(t: float) -> void:
 	for f in range(feixes):
 		var ang_f := float(f) * TAU / float(feixes) - animation_time * 0.5
 		var comprimento := lerpf(0.0, 900.0, _suave(abre)) * (1.0 if f % 2 == 0 else 0.6)
+		if comprimento < 4.0:
+			continue  # raio sem comprimento é um triângulo achatado
 		var ponta := centro + Vector2.from_angle(ang_f) * comprimento
 		var lado_f := Vector2.from_angle(ang_f + PI * 0.5) * 34.0 * (1.0 if f % 2 == 0 else 0.5)
 		draw_colored_polygon(PackedVector2Array([centro, ponta + lado_f, ponta - lado_f]), Color(cor_do_anuncio, 0.10 * abre))

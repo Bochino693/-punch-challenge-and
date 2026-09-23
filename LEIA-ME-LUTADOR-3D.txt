@@ -6,9 +6,10 @@ e nao mais desenhos 2D. A animacao (guarda, ginga, jab-direto, reacao ao
 golpe, nocaute e levantar) e feita pelo jogo em cima dos ossos.
 
 MODELO DE FABRICA
-  assets/lutador3d/lutador.glb  (X Bot da Mixamo, uso livre em jogos),
-  vestido como androide de treino: metal escuro, juntas acesas, luvas
-  vermelhas e calcao.
+  assets/lutador3d/lutador.glb  (Vanguard da Mixamo, com textura, uso
+  livre em jogos), com luvas vermelhas colocadas pelo jogo.
+  Qualquer exportacao da Mixamo serve: o jogo mede sozinho para onde o
+  personagem olha e vira ele de frente para a camera.
 
 PARA TROCAR POR OUTRO LUTADOR (ex.: um boxeador realista)
   1. Entre em https://www.mixamo.com (gratis, conta Adobe).

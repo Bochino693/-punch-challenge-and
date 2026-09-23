@@ -131,16 +131,18 @@ func bater(forca: float, derruba := false, pontos := -1, ultimo := false) -> Dic
 		_tocar("knockout")
 	elif not _caindo:
 		papel = reacao_para_pontos(pontos, f)
-		desdenhou = papel == "taunt_weak" and pontos >= 0 and pontos < 6000
+		desdenhou = papel == "taunt_weak" and pontos >= 0 and pontos < LIMITE_DO_DESDEM
 		_tempo_reacao = float(DURACAO.get(papel, 0.8))
 		_vai_comemorar = ultimo
 		_tocar(papel)
 	return {"nocaute": nocaute, "dano": dano, "reacao": papel, "desdenhou": desdenhou}
 
 
-## Abaixo de 6000 pontos o adversário desdenha; acima, a força escolhe.
+## Abaixo de `LIMITE_DO_DESDEM` o adversário desdenha; acima, a força escolhe.
+const LIMITE_DO_DESDEM := 2500
+
 static func reacao_para_pontos(pontos: int, forca: float) -> String:
-	if pontos >= 0 and pontos < 6000:
+	if pontos >= 0 and pontos < LIMITE_DO_DESDEM:
 		return "taunt_weak"
 	var reacao := reacao_para_forca(forca)
 	return "hit_light" if reacao == "taunt_weak" else reacao

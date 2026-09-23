@@ -5,10 +5,10 @@ extends Lutador3D
 ##
 ## O modelo é qualquer personagem com o esqueleto da Mixamo
 ## (`mixamorig:*`) em `assets/lutador3d/lutador.glb`. O que vem de fábrica
-## é um androide de treino (o boneco "X Bot" da Mixamo, uso livre em
-## jogos) vestido aqui mesmo: metal escuro, juntas acesas, luvas
-## vermelhas e calção. Trocar o arquivo por outro personagem da Mixamo
-## basta — a animação é feita em código em cima dos ossos, então não
+## é o "Vanguard" da Mixamo (uso livre em jogos), com textura própria:
+## recebe só as luvas. O boneco liso "X Bot" (malhas `Beta_*`) ainda é
+## reconhecido e vestido aqui mesmo (metal, capacete, calção e botas).
+## Trocar o arquivo por outro personagem da Mixamo basta — a animação é feita em código em cima dos ossos, então não
 ## depende de o arquivo trazer animação nenhuma.
 ##
 ## A LÓGICA DO COMBATE É HERDADA de `Lutador3D` (papéis, recuo, dano,
@@ -55,10 +55,20 @@ var _direcao_de_descanso := {}   ## índice -> Vector3 (para o filho)
 var _pe_de_descanso_y := 0.0
 var _mat_corpo: StandardMaterial3D = null
 var _mat_junta: StandardMaterial3D = null
+## Clarão do golpe num personagem com textura própria: uma passada extra,
+## aditiva, só nos quadros em que o clarão está aceso.
+var _mat_clarao: StandardMaterial3D = null
+var _malhas_com_textura: Array[MeshInstance3D] = []
 var _pronto := false
 var _de_fabrica := false
 var _proporcoes := false
 var _curto_por_indice := PackedStringArray()
+## Do espaço do PERSONAGEM (+X esquerda dele, +Y cima, +Z frente) para o
+## espaço do ESQUELETO. Cada exportação da Mixamo sai com eixos próprios
+## (o X Bot em Y-cima olhando para +Z; o Vanguard em Z-cima olhando para
+## trás), então os eixos são medidos nos próprios ossos.
+var _vira := Basis.IDENTITY
+var _cima := Vector3.UP
 var _dedo := PackedByteArray()
 
 ## Os pedidos do quadro: direções para ossos e inclinações extras.
@@ -81,19 +91,52 @@ func montar() -> void:
 	var pai := _esqueleto.get_parent() as Node3D
 	_escala_do_armature = pai.scale.x if pai != null else 1.0
 	_mapear_ossos()
-	if not _ossos.has("Hips") or not _ossos.has("LeftForeArm") or not _ossos.has("HeadTop_End"):
-		return
+	for osso in ["Hips", "Head", "LeftArm", "RightArm", "LeftForeArm", "LeftFoot", "RightFoot"]:
+		if not _ossos.has(osso):
+			return
+	_medir_eixos()
+	_pe_de_descanso_y = minf(
+		_altura(_descanso_global[_ossos["LeftFoot"]].origin), _altura(_descanso_global[_ossos["RightFoot"]].origin)
+	)
 	# Altura igual à do desenho antigo, para o enquadramento da câmera valer.
-	var topo := float(_descanso_global[_ossos["HeadTop_End"]].origin.y) * _escala_do_armature
+	var topo := 0.0
+	if _ossos.has("HeadTop_End"):
+		topo = _altura(_descanso_global[_ossos["HeadTop_End"]].origin)
+	else:
+		topo = _altura(_descanso_global[_ossos["Head"]].origin) * 1.11
+	topo *= _escala_do_armature
 	if topo > 0.1:
 		_modelo.scale = Vector3.ONE * (ALTURA_DA_FIGURA / topo)
-	_pe_de_descanso_y = minf(
-		_descanso_global[_ossos["LeftFoot"]].origin.y, _descanso_global[_ossos["RightFoot"]].origin.y
-	)
 	_vestir()
 	_proporcoes = _de_fabrica
 	_pronto = true
 	_tocar("idle")
+
+
+## Mede cima, esquerda e frente do personagem nos ossos em pose T e vira o
+## modelo para olhar para a câmera (+Z), seja qual for a exportação.
+func _medir_eixos() -> void:
+	var g := func(n: String) -> Vector3: return (_descanso_global[_ossos[n]] as Transform3D).origin
+	var cima: Vector3 = (g.call("Head") - g.call("Hips")).normalized()
+	var esquerda: Vector3 = g.call("LeftArm") - g.call("RightArm")
+	esquerda = (esquerda - cima * esquerda.dot(cima)).normalized()
+	var frente := esquerda.cross(cima).normalized()
+	_vira = Basis(esquerda, cima, frente)
+	_cima = cima
+	# Do esqueleto até a raiz do modelo (o Armature costuma vir girado).
+	var t := Transform3D.IDENTITY
+	var no: Node = _esqueleto
+	while no != null and no != _modelo:
+		if no is Node3D:
+			t = (no as Node3D).transform * t
+		no = no.get_parent()
+	var f := t.basis * frente
+	_modelo.rotation.y = -atan2(f.x, f.z) if Vector2(f.x, f.z).length() > 0.001 else 0.0
+
+
+## Altura de um ponto do esqueleto, medida no "cima" do personagem.
+func _altura(p: Vector3) -> float:
+	return p.dot(_cima)
 
 
 func completo() -> bool:
@@ -206,6 +249,14 @@ func _vestir() -> void:
 			# A luva vive no espaço da mão ENCOLHIDA: compensa a escala dela.
 			luva.position = Vector3(0.0, 0.045, 0.0) * escala / MAO
 			luva.scale = Vector3(1.15, 1.35, 1.25) * escala / MAO
+	if not de_fabrica:
+		_mat_clarao = StandardMaterial3D.new()
+		_mat_clarao.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_mat_clarao.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		_mat_clarao.albedo_color = Color(0.0, 0.0, 0.0)
+		for m in _modelo.find_children("*", "MeshInstance3D", true, false):
+			_malhas_com_textura.append(m as MeshInstance3D)
+		return  # personagem com roupa própria: só as luvas
 	# O calção: tronco de cone na bacia, dois tubos nas coxas e a faixa.
 	var calcao := _peca_no_osso("Hips", _cilindro(0.150, 0.160, 0.15, COR_CALCAO), escala)
 	if calcao != null:
@@ -411,20 +462,21 @@ func _mover_o_corpo() -> void:
 
 ## Aponta um osso numa direção (espaço do personagem).
 func _apontar(curto: String, direcao: Vector3) -> void:
-	_alvo[curto] = direcao.normalized()
+	_alvo[curto] = (_vira * direcao).normalized()
 
 
 ## Mistura a direção atual do osso com outra, pelo peso `w`.
 func _misturar(curto: String, direcao: Vector3, w: float) -> void:
 	if w <= 0.0:
 		return
-	var atual: Vector3 = _alvo.get(curto, direcao.normalized())
-	_alvo[curto] = atual.lerp(direcao.normalized(), clampf(w, 0.0, 1.0)).normalized()
+	var d := (_vira * direcao).normalized()
+	var atual: Vector3 = _alvo.get(curto, d)
+	_alvo[curto] = atual.lerp(d, clampf(w, 0.0, 1.0)).normalized()
 
 
 ## Inclinação extra (eixo e ângulo no espaço do personagem), acumulada.
 func _inclinar(curto: String, eixo: Vector3, angulo: float) -> void:
-	var q := Quaternion(eixo.normalized(), angulo)
+	var q := Quaternion((_vira * eixo).normalized(), angulo)
 	_extra[curto] = q * (_extra.get(curto, Quaternion.IDENTITY) as Quaternion)
 
 
@@ -459,12 +511,12 @@ func _aplicar_pose(subida: float) -> void:
 			# A própria mão encolhe para caber inteira na luva.
 			sk.set_bone_pose_scale(i, Vector3.ONE * MAO)
 		if curto == "LeftFoot" or curto == "RightFoot":
-			pe_min = minf(pe_min, (global[i] as Transform3D).origin.y)
+			pe_min = minf(pe_min, _altura((global[i] as Transform3D).origin))
 	# OS PÉS NO CHÃO: a bacia desce o que os joelhos dobraram.
 	var hips: int = _ossos["Hips"]
 	var desce := 0.0 if pe_min == INF else (pe_min - _pe_de_descanso_y)
 	var subida_local := subida / maxf(_escala_do_armature * _modelo.scale.y, 0.0001)
-	sk.set_bone_pose_position(hips, (_descanso_local[hips] as Transform3D).origin - Vector3(0.0, desce - subida_local, 0.0))
+	sk.set_bone_pose_position(hips, (_descanso_local[hips] as Transform3D).origin - _cima * (desce - subida_local))
 
 
 static func _giro_entre(de: Vector3, para: Vector3) -> Quaternion:
@@ -481,6 +533,13 @@ static func _giro_entre(de: Vector3, para: Vector3) -> Quaternion:
 
 # ---------------------------------------------------------------- tinta
 func _pintar() -> void:
+	if _mat_clarao != null:
+		var brilho := clampf(_clarao, 0.0, 1.0) * 0.55
+		_mat_clarao.albedo_color = Color(1.0, 0.75, 0.6) * brilho
+		var ligado := brilho > 0.01
+		for mi in _malhas_com_textura:
+			if (mi.material_overlay != null) != ligado:
+				mi.material_overlay = _mat_clarao if ligado else null
 	if _mat_corpo != null:
 		_mat_corpo.emission_energy_multiplier = clampf(_clarao, 0.0, 1.0) * 0.9
 	if _mat_junta != null:
