@@ -1,11 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 	<uses-feature android:name="android.hardware.usb.host" android:required="true"/>
 	<uses-feature android:name="android.hardware.camera.any" android:required="false"/>
 	<uses-feature android:name="android.hardware.camera.external" android:required="false"/>
 	<uses-permission android:name="android.permission.CAMERA"/>
 
     <application android:resizeableActivity="true" android:hardwareAccelerated="true">
+        <!--
+        PERMISSÃO USB UMA VEZ SÓ. A atividade do jogo (GodotApp) passa a
+        atender o encaixe do Arduino e da webcam. No primeiro encaixe o
+        Android oferece "Usar por padrão"; marcado, ele lembra para sempre
+        e o jogo não pergunta mais a cada abertura.
+        -->
+        <activity android:name="com.godot.game.GodotApp" tools:node="merge">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/punch_usb_devices" />
+        </activity>
         <!--
         Plugin metadata:
 

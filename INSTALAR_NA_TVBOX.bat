@@ -25,6 +25,8 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+rem Camera liberada pela linha de comando: o jogo nao pergunta nunca.
+"%ADB%" shell pm grant com.lazersport.punchchallenge android.permission.CAMERA
 echo.
 echo INSTALADO. Abra o Punch Challenge na TV Box.
 pause
