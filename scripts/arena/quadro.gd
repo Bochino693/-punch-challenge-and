@@ -123,42 +123,59 @@ static func barras(alvo: CanvasItem, dano: float, tempo: float) -> void:
 
 ## A BARRA DE VIDA — a leitura de jogo de luta, de longe.
 ##
+## Barra INCLINADA, como nos jogos de luta: um paralelogramo com degradê
+## feito por cor de vértice (quatro pontos, custo nenhum para a GPU),
+## brilho de vidro na metade de cima e o rastro do golpe atrás.
+##
 ## `vida` é o que sobrou (1 = inteiro); `fantasma` é a vida de um instante
-## atrás, que desce devagar e deixa à mostra, em branco, o pedaço que o
-## soco acabou de arrancar. É esse rastro que faz o golpe "doer" na tela.
+## atrás, que desce devagar e deixa à mostra o pedaço que o soco acabou de
+## arrancar. É esse rastro que faz o golpe "doer" na tela.
+const INCLINA := 26.0
+
+static func _faixa(alvo: CanvasItem, x0: float, x1: float, y0: float, y1: float, c0: Color, c1: Color) -> void:
+	if x1 - x0 < 1.0:
+		return
+	var h := y1 - y0
+	var d := INCLINA * h / VIDA.size.y
+	alvo.draw_polygon(
+		PackedVector2Array([Vector2(x0 + d, y0), Vector2(x1 + d, y0), Vector2(x1, y1), Vector2(x0, y1)]),
+		PackedColorArray([c0, c1, c1, c0])
+	)
+
 static func vida(alvo: CanvasItem, fonte: Font, vida: float, fantasma: float, tempo: float, rotulo: String) -> void:
 	var r := VIDA
 	var v := clampf(vida, 0.0, 1.0)
 	var f := clampf(maxf(fantasma, v), 0.0, 1.0)
-	# caixa: sombra, trilho escuro, fio de ouro
-	alvo.draw_rect(r.grow(8.0), Color(0, 0, 0, 0.45))
-	alvo.draw_rect(r.grow(4.0), ESCURO)
-	alvo.draw_rect(r, Color("2a0b14"))
-	# o rastro do golpe
+	var x0 := r.position.x
+	var larg := r.size.x - INCLINA
+	var y0 := r.position.y
+	var y1 := r.end.y
+	# moldura: sombra, aro de ouro e trilho escuro
+	_faixa(alvo, x0 - 10.0, x0 + larg + 10.0, y0 - 7.0, y1 + 7.0, Color(0, 0, 0, 0.55), Color(0, 0, 0, 0.55))
+	_faixa(alvo, x0 - 6.0, x0 + larg + 6.0, y0 - 4.0, y1 + 4.0, OURO_ESC, OURO)
+	_faixa(alvo, x0, x0 + larg, y0, y1, Color("12040a"), Color("2a0b14"))
+	# o rastro do golpe: vermelho vivo que clareia para o branco
 	if f > v:
-		alvo.draw_rect(Rect2(r.position.x + r.size.x * v, r.position.y, r.size.x * (f - v), r.size.y), Color(1, 1, 1, 0.85))
-	# a vida: verde → âmbar → vermelho; pisca quando está por um fio
+		_faixa(alvo, x0 + larg * v, x0 + larg * f, y0, y1, Color("ff3b3b"), Color(1, 1, 1, 0.9))
+	# a vida: degradê do tom escuro para o claro da mesma cor
 	var cor := Paleta.VERDE.lerp(Paleta.AMBAR, clampf((1.0 - v) / 0.5, 0.0, 1.0))
 	cor = cor.lerp(Paleta.VERMELHO, clampf((0.5 - v) / 0.35, 0.0, 1.0))
 	if v < 0.25:
-		cor = cor.lerp(Color.WHITE, 0.25 * (0.5 + 0.5 * sin(tempo * 12.0)))
-	var cheio := Rect2(r.position, Vector2(r.size.x * v, r.size.y))
-	alvo.draw_rect(cheio, cor)
-	# brilho de vidro na metade de cima
-	alvo.draw_rect(Rect2(cheio.position, Vector2(cheio.size.x, r.size.y * 0.38)), Color(1, 1, 1, 0.20))
-	# divisões a cada 10%
-	for i in range(1, 10):
-		var x := r.position.x + r.size.x * float(i) / 10.0
-		alvo.draw_line(Vector2(x, r.position.y + 6.0), Vector2(x, r.end.y - 6.0), Color(0, 0, 0, 0.35), 2.0)
-	alvo.draw_rect(r.grow(4.0), OURO, false, 3.0)
-	# o rótulo em cima da barra, à esquerda, e a porcentagem à direita
+		cor = cor.lerp(Color.WHITE, 0.30 * (0.5 + 0.5 * sin(tempo * 12.0)))
+	_faixa(alvo, x0, x0 + larg * v, y0, y1, cor.darkened(0.35), cor.lightened(0.15))
+	# vidro: faixa clara na metade de cima e um reflexo correndo
+	_faixa(alvo, x0, x0 + larg * v, y0, y0 + r.size.y * 0.42, Color(1, 1, 1, 0.26), Color(1, 1, 1, 0.10))
+	var brilho := fmod(tempo * 0.45, 1.6) - 0.3
+	if brilho > 0.0 and brilho < v:
+		var bx := x0 + larg * brilho
+		_faixa(alvo, bx, minf(bx + 70.0, x0 + larg * v), y0, y1, Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.35))
 	if fonte != null:
-		var base := r.position.y - 14.0
-		alvo.draw_string_outline(fonte, Vector2(r.position.x, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, 8, ESCURO)
-		alvo.draw_string(fonte, Vector2(r.position.x, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, Color.WHITE)
+		var base := y0 - 16.0
+		alvo.draw_string_outline(fonte, Vector2(x0, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, 8, ESCURO)
+		alvo.draw_string(fonte, Vector2(x0, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, Color.WHITE)
 		var pct := "%d%%" % int(round(v * 100.0))
-		alvo.draw_string_outline(fonte, Vector2(r.position.x, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 30, 8, ESCURO)
-		alvo.draw_string(fonte, Vector2(r.position.x, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 30, cor)
+		alvo.draw_string_outline(fonte, Vector2(x0, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 34, 8, ESCURO)
+		alvo.draw_string(fonte, Vector2(x0, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 34, cor.lightened(0.2))
 
 ## A cor que a coluna está mostrando. O texto do medidor usa a mesma,
 ## senão o número e a barra parecem falar de coisas diferentes.

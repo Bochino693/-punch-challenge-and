@@ -78,6 +78,7 @@ var _clarao := 0.0
 var queda := 0.0
 var dano := 0.0
 var em_guarda := false
+var _sombra_em := 2.5
 
 
 func montar() -> void:
@@ -227,6 +228,16 @@ func atualizar(delta: float) -> void:
 			_tocar("guard" if em_guarda else "idle")
 	elif _tempo_reacao <= 0.0 and not (_papel in PAPEIS_CONTINUOS):
 		_tocar("guard" if em_guarda else "idle")
+	elif _papel == "guard" and _tempo_reacao <= 0.0:
+		# SOMBRA NA GUARDA: esperando o soco, ele não fica só balançando.
+		# De tempos em tempos solta um jab-direto no ar e volta à guarda —
+		# é a provocação que chama o soco.
+		_sombra_em -= delta
+		if _sombra_em <= 0.0:
+			_sombra_em = randf_range(3.5, 6.0)
+			_tempo_reacao = 1.0
+			_papel = ""
+			_tocar("taunt_weak")
 
 	_avancar_o_quadro()
 	_mover_o_corpo()

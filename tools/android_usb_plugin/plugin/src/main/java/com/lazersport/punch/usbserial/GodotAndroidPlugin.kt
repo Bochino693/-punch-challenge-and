@@ -318,6 +318,57 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     }
 
     /** Quantas câmeras a API clássica do Android enxerga. */
+    /**
+     * RELATÓRIO DA CÂMERA, uma linha por fato, para a Central mostrar e o
+     * operador fotografar: o que a API clássica vê, o que a Camera2 vê (e
+     * em que nível), cada aparelho USB com classe e permissão, e o estado
+     * das duas pontes. É o que separa "a TV Box não tem driver" de "o
+     * Android tem, mas falta permissão" de "a câmera nem está no USB".
+     */
+    @UsedByGodot
+    fun getCameraReport(): String {
+        val linhas = ArrayList<String>()
+        val host = activity
+        linhas.add("ANDROID ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) • ${Build.MANUFACTURER} ${Build.MODEL}")
+        if (host != null) {
+            val ok = host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            linhas.add("PERMISSÃO CAMERA: " + if (ok) "CONCEDIDA" else "NEGADA")
+        }
+        linhas.add("API CLÁSSICA: ${systemCameraCount()} câmera(s)" + if (systemCameraFailed) " • FALHOU AO ABRIR" else "")
+        try {
+            val cm = host?.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+            val ids = cm?.cameraIdList.orEmpty()
+            val partes = ids.map { id ->
+                val c = cm!!.getCameraCharacteristics(id)
+                val lado = when (c.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)) {
+                    0 -> "frente"; 1 -> "trás"; 2 -> "EXTERNA"; else -> "?"
+                }
+                val nivel = when (c.get(android.hardware.camera2.CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
+                    2 -> "LEGACY"; 0 -> "LIMITED"; 1 -> "FULL"; 3 -> "NIVEL3"; 4 -> "EXTERNAL"; else -> "?"
+                }
+                "$id:$lado/$nivel"
+            }
+            linhas.add("CAMERA2: " + if (partes.isEmpty()) "nenhuma" else partes.joinToString("  "))
+        } catch (t: Throwable) {
+            linhas.add("CAMERA2: erro ${t.javaClass.simpleName}")
+        }
+        try {
+            val devs = usbManager.deviceList.values
+            if (devs.isEmpty()) linhas.add("USB: nenhum aparelho no barramento")
+            for (d in devs) {
+                val video = isUvcCamera(d)
+                val perm = if (usbManager.hasPermission(d)) "com permissão" else "SEM permissão"
+                val nome = d.productName ?: d.deviceName
+                linhas.add("USB %04X:%04X %s%s • %s".format(d.vendorId, d.productId, nome, if (video) " • VÍDEO" else "", perm))
+            }
+        } catch (t: Throwable) {
+            linhas.add("USB: erro ${t.javaClass.simpleName}")
+        }
+        linhas.add("PONTE: $cameraStatus")
+        linhas.add("QUADROS: aceitos $cameraFramesAccepted • rejeitados $cameraFramesRejected • $lastCameraFrameFormat ${cameraFrameWidth}x${cameraFrameHeight}")
+        return linhas.joinToString("\n")
+    }
+
     /** Para o jogo decidir quem abre a câmera: esta ponte ou o CameraServer. */
     @UsedByGodot
     fun getSystemCameraCount(): Int = if (systemCameraFailed) 0 else systemCameraCount()

@@ -960,7 +960,21 @@ func _exit_tree() -> void:
 ## para arrumar: o que precisa de saneamento é a curva, e ela é a mesma
 ## que a Central desenha, que o placar usa e que o firmware recebe. Uma
 ## passagem só por `ScoreCurve.sanitize` mantém as três concordando.
+## O SOCO TEM DE ATRAVESSAR O FEIXE EM ATÉ 15 ms.
+##
+## Com a palheta de 20 mm, 15 ms são 1,33 m/s. Abaixo disso não é soco, é
+## empurrão: antes o piso de fábrica era 0,30 m/s (66 ms de bloqueio), e
+## qualquer encostada virava ponto. O piso nunca desce deste valor — nem
+## pela Central, nem pela escala automática —, e a placa recebe o mesmo
+## número na CONFIG, recusando o bloqueio lento como FRACO lá mesmo.
+const BLOQUEIO_MAXIMO_S := 0.015
+
+func _piso_do_bloqueio() -> float:
+	return sensor_raio / BLOQUEIO_MAXIMO_S
+
 func _aplicar_faixas() -> void:
+	hit_min_speed = maxf(hit_min_speed, _piso_do_bloqueio())
+	hit_max_speed = maxf(hit_max_speed, hit_min_speed + 1.5)
 	var cfg := ScoreCurve.sanitize(
 		hit_min_speed, hit_max_speed, score_contraste, score_dead_zone, score_ref_speed
 	)
@@ -1550,6 +1564,7 @@ func _processar_resultado(delta: float) -> void:
 ## meio segundo antes, que é quando a festa parece solta da tela.
 var _ato_assentou := false
 var _ato_festejou := false
+var _ato_carimbou := false
 var _festa_ranking_decorrido := 0.0
 var _festa_ranking_proximo := 0.0
 var _festa_ranking_canhao := 0
@@ -1561,6 +1576,16 @@ func _marcar_atos_do_ranking() -> void:
 	if celebracao.is_empty():
 		return
 	var t := _tempo_do_ranking()
+	# A BATIDA DO SELO: som grave, tranco e faíscas no mesmo quadro em que
+	# o carimbo encosta na tela.
+	if not _ato_carimbou and t >= ATO_ANUNCIO / 5.1:
+		_ato_carimbou = true
+		sons.play("hit", -2.0)
+		sons.play("subgrave", -6.0)
+		tremor = maxf(tremor, 26.0)
+		var cor_c: Color = celebracao.get("cor", Paleta.AMBAR)
+		fx.faiscas(Vector2(540.0, 810.0), 40, cor_c, 1400.0)
+		fx.onda(Vector2(540.0, 810.0), 200.0, 900.0, cor_c, 16.0, 0.6)
 	# A LINHA ACENDE: só o som. Tremer a tela aqui sacudia a tabela
 	# inteira justamente quando a pessoa tenta ler a posição dela.
 	if not _ato_assentou and t >= ATO_ANUNCIO + ATO_TABELA:
@@ -1921,6 +1946,7 @@ func _iniciar_rodada() -> void:
 	ranking_started_at = -1.0
 	_ato_assentou = false
 	_ato_festejou = false
+	_ato_carimbou = false
 	_festa_ranking_decorrido = 0.0
 	_festa_ranking_proximo = 0.0
 	_festa_ranking_canhao = 0
@@ -4309,9 +4335,14 @@ func _pagina_recordes(alpha: float) -> void:
 		_texto("AINDA NINGUÉM SOCOU ESTA MÁQUINA", 780.0, 32, Color(Paleta.TINTA_FRACA, alpha))
 		_texto("O PRIMEIRO NOME DA LISTA PODE SER O SEU", 832.0, 24, Color(Paleta.TINTA_LEVE, alpha))
 		return
-	var page := int(state_time / 16.0) % 4
+	# SÓ AS PÁGINAS QUE TÊM GENTE, e só as linhas ocupadas: um quadro de
+	# recordes cheio de "—" diz que ninguém joga aqui.
+	var paginas := clampi(int(ceil(float(ranking.size()) / 5.0)), 1, 4)
+	var page := int(state_time / 16.0) % paginas
 	for row in range(5):
 		var i := page * 5 + row
+		if i >= ranking.size():
+			break
 		var y := 466.0 + row * 116.0
 		var cor := _cor_da_posicao(i + 1)
 		var linha := Rect2(MARGEM + 40.0, y, LARGURA_UTIL - 80.0, 98.0)
@@ -4329,7 +4360,7 @@ func _pagina_recordes(alpha: float) -> void:
 			_draw_player_photo(Rect2(linha.position + Vector2(210.0, 11.0), Vector2(76.0, 76.0)), str(ranking[i].get("photo_path", "")), alpha)
 			_texto("%04d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 			_texto("PONTOS", meio, 18, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 190.0)
-	_texto("POSIÇÕES %02d–%02d" % [page * 5 + 1, page * 5 + 5], 1152.0, 26, Color(Paleta.CIANO, alpha))
+	_texto("POSIÇÕES %02d–%02d" % [page * 5 + 1, mini(page * 5 + 5, ranking.size())], 1152.0, 26, Color(Paleta.CIANO, alpha))
 
 ## Página 3 — os três passos, do tamanho de quem lê de longe.
 func _pagina_como_jogar(alpha: float) -> void:
@@ -4762,6 +4793,19 @@ func _draw_score_hero() -> void:
 	_draw_barra_de_pontuacao(progresso, progresso_contagem, cor, measuring)
 
 	if verdict_time >= 0.0:
+		# A FAIXA ESCURA DO VEREDITO. O nome do nível vem na cor do nível —
+		# e os níveis altos são vermelhos, em cima do rodapé vermelho. A
+		# faixa inclinada por trás dá contraste a qualquer cor, sem mudar
+		# a identidade de nenhum nível.
+		var abre_faixa := clampf(verdict_time / 0.25, 0.0, 1.0)
+		var topo_f := 1418.0
+		var base_f := 1580.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0.0, topo_f + 18.0), Vector2(TELA.x, topo_f - 18.0),
+			Vector2(TELA.x, base_f - 18.0), Vector2(0.0, base_f + 18.0),
+		]), Color("12040a", 0.80 * abre_faixa))
+		draw_line(Vector2(0.0, topo_f + 18.0), Vector2(TELA.x, topo_f - 18.0), Color(cor, 0.9 * abre_faixa), 3.0, true)
+		draw_line(Vector2(0.0, base_f + 18.0), Vector2(TELA.x, base_f - 18.0), Color(cor, 0.9 * abre_faixa), 3.0, true)
 		# O NOME DO NÍVEL VEM ANTES DA COLOCAÇÃO. A pessoa quer saber o
 		# que ela fez — "NOCAUTE" — e só depois onde isso a coloca. A
 		# ordem inversa transformava o veredito numa tabela.
@@ -5052,7 +5096,7 @@ const LINHA_CASCATA := 0.035
 const LINHA_ENTRADA := 0.24
 const LINHA_DESLIZE := 36.0
 
-const ATO_ANUNCIO := 0.95
+const ATO_ANUNCIO := 1.70
 const ATO_TABELA := 0.60
 const ATO_ASSENTA := 0.35
 
@@ -5082,9 +5126,10 @@ func _draw_ranking_reveal() -> void:
 	# A janela já chega rolada para a vizinhança da posição conquistada,
 	# com a linha dela na quinta posição visível (do 1º ao 5º lugar a
 	# tabela aparece desde o topo).
-	var foco := clampi(posicao_no_ranking - 5, 0, maxi(RANKING_TAMANHO - LINHAS_VISIVEIS, 0))
+	var ocupadas := mini(ranking.size(), RANKING_TAMANHO)
+	var foco := clampi(posicao_no_ranking - 5, 0, maxi(ocupadas - LINHAS_VISIVEIS, 0))
 	var offset := float(foco) * LINHA_ALTURA
-	for i in range(RANKING_TAMANHO):
+	for i in range(ocupadas):
 		var y := LISTA_TOPO + float(i) * LINHA_ALTURA - offset
 		if y < LISTA_RECORTE_TOPO or y + LINHA_ALTURA - 18.0 > LISTA_RECORTE_BASE:
 			continue
@@ -5137,6 +5182,9 @@ func _ranking_linha(i: int, y: float, entrada: float, e_do_jogador: bool, destaq
 	var card := Rect2(78.0 - (1.0 - passo) * LINHA_DESLIZE, y, 924.0, LINHA_ALTURA - 16.0)
 
 	if vazia:
+		# Vaga sem ninguém não vira ladrilho: a tabela termina onde
+		# terminam os nomes.
+		return
 		_placa(card, 10.0, Color("170509", tinta * 0.85))
 		draw_rect(card, Color("3d1019", tinta * 0.8), false, 1.5)
 		_texto("%02d" % posicao, y + 66.0, 34, Color(Paleta.TINTA_LEVE, tinta), HORIZONTAL_ALIGNMENT_CENTER, card.position.x + 24.0, 82.0)
@@ -5206,8 +5254,27 @@ func _passo_com_batida(t: float) -> float:
 func _ranking_anuncio(t: float) -> void:
 	var centro := Vector2(540.0, 810.0)
 	var celebracao := RankingCelebration.para(posicao_no_ranking)
-	var abre := clampf(t * 2.2, 0.0, 1.0)
-	var escala := _passo_com_batida(abre)
+	var abre := clampf(t * 3.0, 0.0, 1.0)
+	# O SELO DESPENCA: nasce grande e bate no lugar, como um carimbo.
+	var escala := lerpf(2.4, 1.0, _suave(abre)) * (1.0 + 0.08 * sin(clampf((t * 3.0 - 1.0) * 3.0, 0.0, 1.0) * PI))
+	var cor_do_anuncio: Color = celebracao.get("cor", Paleta.AMBAR)
+	# O clarão da batida e as duas ondas de choque saindo do selo.
+	var batida := clampf(t * 3.0 - 1.0, 0.0, 1.0)
+	if batida > 0.0:
+		draw_rect(Rect2(Vector2.ZERO, TELA), Color(Color.WHITE, 0.55 * (1.0 - batida) * (1.0 - batida)))
+		for onda in range(2):
+			var o := clampf(batida * 1.3 - float(onda) * 0.25, 0.0, 1.0)
+			if o > 0.0 and o < 1.0:
+				var r_onda := lerpf(280.0, 900.0, _suave(o))
+				Traco.arco(self, centro, r_onda, Color(cor_do_anuncio, 0.7 * (1.0 - o)), lerpf(26.0, 4.0, o))
+	# O leque de luz girando atrás, longo e alternado.
+	var feixes := 24
+	for f in range(feixes):
+		var ang_f := float(f) * TAU / float(feixes) - animation_time * 0.5
+		var comprimento := lerpf(0.0, 900.0, _suave(abre)) * (1.0 if f % 2 == 0 else 0.6)
+		var ponta := centro + Vector2.from_angle(ang_f) * comprimento
+		var lado_f := Vector2.from_angle(ang_f + PI * 0.5) * 34.0 * (1.0 if f % 2 == 0 else 0.5)
+		draw_colored_polygon(PackedVector2Array([centro, ponta + lado_f, ponta - lado_f]), Color(cor_do_anuncio, 0.10 * abre))
 	var raio := float(celebracao.get("raio_selo", 280.0)) * escala
 	var cor_selo: Color = celebracao.get("cor", Paleta.AMBAR)
 

@@ -22,7 +22,7 @@ LED D0 troque de estado uma vez quando a palheta entra e volte quando sai.
 CONFIGURACAO PADRAO:
   polaridade: AUTO
   largura: 20 mm
-  velocidade minima: 0,30 m/s
+  velocidade minima: 1,33 m/s (palheta atravessa o feixe em ate 15 ms)
   velocidade maxima: 5,20 m/s
   pulso minimo: 0,70 ms
 
