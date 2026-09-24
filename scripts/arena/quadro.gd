@@ -41,8 +41,9 @@ const PLACA := Rect2(268.0, 1244.0, 544.0, 170.0)
 ## Quantos degraus tem cada coluna.
 const DEGRAUS := 20
 
-const ESCURO := Color("1a0710")
-const MADEIRA := Color("3d1220")
+const ESCURO := Color("110a1e")
+const ZEBRA = preload("res://assets/tema/moldura_arena.png")
+const MADEIRA := Color("2a1a46")
 const OURO := Color("ffdc27")
 const OURO_ESC := Color("8a6a10")
 
@@ -53,10 +54,24 @@ static func fundo(alvo: CanvasItem) -> void:
 	alvo.draw_rect(TELA, ESCURO)
 
 ## A imagem do mundo 3D. `textura` é a do `SubViewport`.
-static func imagem(alvo: CanvasItem, textura: Texture2D, alpha := 1.0) -> void:
+##
+## O TREMOR E O ZOOM DO GOLPE MORAM AQUI, e só aqui: a imagem balança
+## DENTRO da moldura (recortando a textura), e nada fora do quadro se
+## mexe. `desloc` em pixels de tela; `zoom` >= 1.
+static func imagem(alvo: CanvasItem, textura: Texture2D, alpha := 1.0, desloc := Vector2.ZERO, zoom := 1.0) -> void:
 	if textura == null:
 		return
-	alvo.draw_texture_rect(textura, TELA, false, Color(1, 1, 1, alpha))
+	if desloc == Vector2.ZERO and zoom <= 1.0001:
+		alvo.draw_texture_rect(textura, TELA, false, Color(1, 1, 1, alpha))
+		return
+	var tam := Vector2(textura.get_size())
+	var folga := 1.0 + 2.0 * maxf(absf(desloc.x) / TELA.size.x, absf(desloc.y) / TELA.size.y) + 0.002
+	var z := maxf(zoom, folga)
+	var fonte := tam / z
+	var px := tam / TELA.size
+	var inicio := (tam - fonte) * 0.5 - desloc * px / z
+	inicio = inicio.clamp(Vector2.ZERO, tam - fonte)
+	alvo.draw_texture_rect_region(textura, TELA, Rect2(inicio, fonte), Color(1, 1, 1, alpha))
 
 ## A MOLDURA. Quatro barras e não um retângulo vazado, porque um
 ## retângulo com contorno grosso pinta o miolo inteiro por baixo da
@@ -68,26 +83,19 @@ static func moldura(alvo: CanvasItem, cor: Color, pulso := 0.0) -> void:
 	var m := MOLDURA
 	var t := TELA
 	var brilho := clampf(pulso, 0.0, 1.0)
-	var madeira := MADEIRA.lerp(cor, brilho * 0.55)
-	# as quatro barras da moldura
-	alvo.draw_rect(Rect2(m.position.x, m.position.y, m.size.x, t.position.y - m.position.y), madeira)
-	alvo.draw_rect(Rect2(m.position.x, t.end.y, m.size.x, m.end.y - t.end.y), madeira)
-	alvo.draw_rect(Rect2(m.position.x, t.position.y, t.position.x - m.position.x, t.size.y), madeira)
-	alvo.draw_rect(Rect2(t.end.x, t.position.y, m.end.x - t.end.x, t.size.y), madeira)
-	# o fio de ouro por fora e o rebaixo por dentro: são os dois que dão
-	# espessura à moldura. Sem o de dentro ela parece um adesivo.
-	alvo.draw_rect(m, Color(OURO, 0.85 + brilho * 0.15), false, 5.0)
-	alvo.draw_rect(m.grow(-12.0), Color(OURO_ESC, 0.55 + brilho * 0.45), false, 2.0)
-	alvo.draw_rect(t.grow(5.0), ESCURO, false, 10.0)
-	alvo.draw_rect(t.grow(1.0), Color(OURO, 0.55 + brilho * 0.45), false, 3.0)
-	# os quatro rebites: é o detalhe que diz "objeto pendurado" e não
-	# "retângulo desenhado".
-	for sx in [0.0, 1.0]:
-		for sy in [0.0, 1.0]:
-			var p := Vector2(lerpf(m.position.x + 18.0, m.end.x - 18.0, sx),
-				lerpf(m.position.y + 23.0, m.end.y - 20.0, sy))
-			alvo.draw_circle(p, 7.0, Color(OURO, 0.9))
-			alvo.draw_circle(p, 3.0, ESCURO)
+	# o rebaixo escuro entre a faixa e a imagem
+	var escuro := ESCURO.lerp(cor, brilho * 0.35)
+	alvo.draw_rect(Rect2(m.position.x, m.position.y, m.size.x, t.position.y - m.position.y), escuro)
+	alvo.draw_rect(Rect2(m.position.x, t.end.y, m.size.x, m.end.y - t.end.y), escuro)
+	alvo.draw_rect(Rect2(m.position.x, t.position.y, t.position.x - m.position.x, t.size.y), escuro)
+	alvo.draw_rect(Rect2(t.end.x, t.position.y, m.end.x - t.end.x, t.size.y), escuro)
+	# o fio de luz em volta da imagem, na cor do nível (acende no golpe)
+	alvo.draw_rect(t.grow(2.0), Color(cor, 0.45 + brilho * 0.55), false, 3.0 + brilho * 3.0)
+	# A FAIXA ZEBRADA DO GABINETE, com os cantos chanfrados, por cima de
+	# tudo: é o mesmo desenho do vidro da máquina, então a arena parece
+	# continuar a moldura de verdade.
+	var faixa := m.grow(10.0)
+	alvo.draw_texture_rect(ZEBRA, faixa, false, Color(1, 1, 1, 1).lerp(cor.lightened(0.3), brilho * 0.35))
 
 ## AS DUAS COLUNAS DE DANO.
 ##
@@ -119,7 +127,7 @@ static func barras(alvo: CanvasItem, dano: float, tempo: float) -> void:
 				# o degrau em que o dano parou: é ele que pisca
 				alvo.draw_rect(caixa, Color(cor, pisca))
 			else:
-				alvo.draw_rect(caixa, Color("3a141d"))
+				alvo.draw_rect(caixa, Color("2a1b43"))
 
 ## A BARRA DE VIDA — a leitura de jogo de luta, de longe.
 ##
@@ -153,10 +161,10 @@ static func vida(alvo: CanvasItem, fonte: Font, vida: float, fantasma: float, te
 	# moldura: sombra, aro de ouro e trilho escuro
 	_faixa(alvo, x0 - 10.0, x0 + larg + 10.0, y0 - 7.0, y1 + 7.0, Color(0, 0, 0, 0.55), Color(0, 0, 0, 0.55))
 	_faixa(alvo, x0 - 6.0, x0 + larg + 6.0, y0 - 4.0, y1 + 4.0, OURO_ESC, OURO)
-	_faixa(alvo, x0, x0 + larg, y0, y1, Color("12040a"), Color("2a0b14"))
+	_faixa(alvo, x0, x0 + larg, y0, y1, Color("0c0615"), Color("1c1030"))
 	# o rastro do golpe: vermelho vivo que clareia para o branco
 	if f > v:
-		_faixa(alvo, x0 + larg * v, x0 + larg * f, y0, y1, Color("ff3b3b"), Color(1, 1, 1, 0.9))
+		_faixa(alvo, x0 + larg * v, x0 + larg * f, y0, y1, Color("ff3baa"), Color(1, 1, 1, 0.9))
 	# a vida: degradê do tom escuro para o claro da mesma cor
 	var cor := Paleta.VERDE.lerp(Paleta.AMBAR, clampf((1.0 - v) / 0.5, 0.0, 1.0))
 	cor = cor.lerp(Paleta.VERMELHO, clampf((0.5 - v) / 0.35, 0.0, 1.0))

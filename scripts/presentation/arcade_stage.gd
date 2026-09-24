@@ -1,6 +1,14 @@
 extends RefCounted
 ## Cenografia e abertura. Não controla créditos, câmera ou pontuação.
-const EMBLEM = preload("res://assets/branding/punch_emblem.svg")
+## A IDENTIDADE SUPER BOXING, a mesma do gabinete. Tudo em IMAGEM pronta
+## (tools/gerar_tema.py): letreiro desenhado pela fonte, numa TV Box, é
+## rasterizado na hora em cada tamanho novo — e foi assim que as letras
+## já engasgaram e saíram serrilhadas antes.
+const LOGO = preload("res://assets/tema/logo.png")
+const FIGHT = preload("res://assets/tema/fight.png")
+const NEVER = preload("res://assets/tema/never_give_up.png")
+const ATE_O_FIM = preload("res://assets/tema/ate_o_fim.png")
+const FUNDO = preload("res://assets/tema/fundo.jpg")
 const Icones = preload("res://scripts/icones.gd")
 ## O SELO DA LAZER & SPORT: o logotipo inteiro numa tela quadrada.
 ##
@@ -10,11 +18,12 @@ const Icones = preload("res://scripts/icones.gd")
 ## cliente. Com o logotipo completo dentro de um quadrado, o selo fica
 ## quadrado e pequeno como se pediu, e continua sendo a marca de verdade.
 const SELO_LAZER = preload("res://assets/branding/selo_lazer.png")
-const RED := Color("ff1934")
-const GOLD := Color("ffdc27")
+const RED := Color("ff26a8")
+const GOLD := Color("ffd014")
 const WHITE := Color("fff9ef")
-const FLOOR := Color("19060d")
-const PANEL := Color("330c16")
+const FLOOR := Color("0b0620")
+const PANEL := Color("1d1040")
+const AZUL := Color("46dcff")
 ## A ENTRADA É UM FILME CURTO, NÃO UM LOGOTIPO APARECENDO.
 ##
 ## Cada tempo abaixo é o INÍCIO de um trecho. Eles estão aqui em cima,
@@ -131,34 +140,10 @@ static func background(canvas: CanvasItem, time: float) -> void:
 
 ## A PARTE QUE NÃO SE MEXE. Desenhada uma vez por tamanho de tela.
 static func background_estatico(canvas: CanvasItem) -> void:
-	canvas.draw_rect(Rect2(0, 0, 1080, 1920), FLOOR)
-	# Grandes planos vermelhos, centro livre para a leitura a distância.
-	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 0), Vector2(1080, 0), Vector2(1080, 290), Vector2(0, 550)]), Color("9f0a20"))
-	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 0), Vector2(780, 0), Vector2(0, 430)]), Color("d00c29"))
-	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 1650), Vector2(1080, 1400), Vector2(1080, 1920), Vector2(0, 1920)]), Color("85091d"))
-	Traco.poligono(canvas, PackedVector2Array([Vector2(230, 1920), Vector2(1080, 1630), Vector2(1080, 1920)]), Color("cc102a"))
-	for side in [0.0, 1.0]:
-		var x := lerpf(28.0, 1052.0, side)
-		# O NÉON DOS DOIS LADOS, EM TRÊS CAMADAS E NÃO EM NOVE.
-		#
-		# Eram nove barras empilhadas, de 8 a 48 px de largura, 1270 px de
-		# altura, cada uma com alfa 0,035 — nove níveis de tinta em
-		# duzentos e cinquenta e cinco, invisíveis uma a uma. Somadas
-		# pintavam SEISCENTOS E QUARENTA MIL pixels por quadro só para
-		# fazer um brilho, e este é o fundo: ele paga esse preço em TODA
-		# tela do jogo, o tempo inteiro. Medido, o fundo era 37% do quadro
-		# — mais do que o placar, os efeitos e a moldura juntos.
-		#
-		# Três camadas com o alfa somado dão o mesmo halo por um terço da
-		# conta.
-		for layer in range(3):
-			canvas.draw_line(
-				Vector2(x, 320), Vector2(x, 1590),
-				Color(RED, 0.105), 10.0 + float(layer) * 15.0, true
-			)
-		canvas.draw_line(Vector2(x, 320), Vector2(x, 1590), RED, 4.0, true)
-	canvas.draw_line(Vector2(0, 552), Vector2(1080, 292), Color(GOLD, 0.55), 2.0, true)
-	canvas.draw_line(Vector2(0, 1652), Vector2(1080, 1402), Color(GOLD, 0.55), 2.0, true)
+	# A ARTE DO GABINETE: raios roxo, magenta e azul sobre azul-noite,
+	# numa imagem só. Um desenho de textura custa menos que os planos e
+	# as barras de néon que havia aqui.
+	canvas.draw_texture_rect(FUNDO, Rect2(0, 0, 1080, 1920), false)
 
 ## A PARTE QUE SE MEXE — e só ela. São vinte e duas fagulhas subindo e
 ## vinte e quatro lâmpadas piscando: linhas finas e curtas, um custo que
@@ -170,15 +155,38 @@ static func background_animado(canvas: CanvasItem, time: float) -> void:
 		for i in range(_quantos(12)):
 			var y := 455.0 + i * 86.0
 			var light := 0.25 + 0.75 * pow(0.5 + 0.5 * sin(time * 3.2 - i * 0.65), 3.0)
-			canvas.draw_line(Vector2(x - 9, y), Vector2(x + 9, y - 7), Color(GOLD, light), 5.0, true)
+			canvas.draw_line(Vector2(x - 9, y), Vector2(x + 9, y - 7), Color(RED if i % 2 else AZUL, light * 0.8), 5.0, true)
 	for i in range(_quantos(22)):
 		var speed := 26.0 + float(i % 4) * 16.0
 		var y := fposmod(float(i) * 97.0 - time * speed, 1860.0)
 		var x := 65.0 + fposmod(float(i) * 157.0, 950.0)
-		canvas.draw_line(Vector2(x, y), Vector2(x + 3, y - 10), Color(GOLD, 0.12), 2.0, true)
+		canvas.draw_line(Vector2(x, y), Vector2(x + 3, y - 10), Color(AZUL if i % 3 else RED, 0.16), 2.0, true)
 
+## O LOGO SUPER BOXING. `size` é o "tamanho de emblema" de sempre (o
+## escudo antigo era quadrado); o logo é mais largo que alto, então a
+## largura sai do tamanho e a altura da proporção da imagem.
 static func emblem(canvas: CanvasItem, center: Vector2, size: float, alpha := 1.0) -> void:
-	canvas.draw_texture_rect(EMBLEM, Rect2(center - Vector2.ONE * size * 0.5, Vector2.ONE * size), false, Color(1, 1, 1, alpha))
+	var largura := size * 2.1
+	var altura := largura * float(LOGO.get_height()) / float(LOGO.get_width())
+	canvas.draw_texture_rect(LOGO, Rect2(center - Vector2(largura, altura) * 0.5, Vector2(largura, altura)), false, Color(1, 1, 1, alpha))
+
+## Uma imagem da marca centrada, na largura pedida.
+static func imagem(canvas: CanvasItem, textura: Texture2D, centro: Vector2, largura: float, cor := Color.WHITE) -> void:
+	var altura := largura * float(textura.get_height()) / float(textura.get_width())
+	canvas.draw_texture_rect(textura, Rect2(centro - Vector2(largura, altura) * 0.5, Vector2(largura, altura)), false, cor)
+
+## "FIGHT!" e "NEVER GIVE UP!" no lugar do nome, como no gabinete.
+const FIGHT_CENTRO := Vector2(540.0, 890.0)
+const FIGHT_LARGURA := 640.0
+const NEVER_CENTRO := Vector2(540.0, 1040.0)
+const NEVER_LARGURA := 600.0
+
+static func titulo(canvas: CanvasItem, alpha: float, tempo: float) -> void:
+	if alpha <= 0.01:
+		return
+	var bate := 1.0 + 0.025 * maxf(0.0, sin(tempo * 3.4))
+	imagem(canvas, FIGHT, FIGHT_CENTRO, FIGHT_LARGURA * bate, Color(1, 1, 1, alpha))
+	imagem(canvas, NEVER, NEVER_CENTRO, NEVER_LARGURA, Color(1, 1, 1, alpha))
 
 ## A ENTRADA, TRECHO A TRECHO.
 ##
@@ -481,30 +489,28 @@ static func _intro_emblema(canvas: Control, time: float, morph: float) -> void:
 static func _intro_letreiro(canvas: Control, time: float, morph: float) -> void:
 	if time < T_TITULO:
 		return
+	# FIGHT! desce batendo; NEVER GIVE UP! entra deslizando. Nascem com a
+	# separação de cor de um monitor mal ajustado, que fecha ao assentar.
 	var desce := _janela(time, T_TITULO, 0.42)
-	var punch_y := lerpf(980.0, 1260.0, _passar_do_ponto(desce, 1.4)) if desce < 1.0 else 1260.0
-	punch_y = lerpf(punch_y, POUSO_PUNCH, smoothstep(0.0, 1.0, morph))
-	var punch_tam := lerpf(134.0, float(POUSO_PUNCH_TAM), smoothstep(0.0, 1.0, morph))
+	var fight_y := lerpf(980.0, 1260.0, _passar_do_ponto(desce, 1.4)) if desce < 1.0 else 1260.0
+	fight_y = lerpf(fight_y, FIGHT_CENTRO.y, smoothstep(0.0, 1.0, morph))
+	var fight_l := lerpf(700.0, FIGHT_LARGURA, smoothstep(0.0, 1.0, morph))
 	var separa := (1.0 - desce) * 26.0
 	if separa > 0.5:
-		canvas._texto_intro("PUNCH", punch_y, punch_tam, POUSO_PUNCH_TAM, Color(RED, 0.55), 60.0 - separa)
-		canvas._texto_intro("PUNCH", punch_y, punch_tam, POUSO_PUNCH_TAM, Color("2ad4ff", 0.55), 60.0 + separa)
-	canvas._texto_intro("PUNCH", punch_y, punch_tam, POUSO_PUNCH_TAM, Color(WHITE, clampf(desce * 2.0, 0.0, 1.0)))
+		imagem(canvas, FIGHT, Vector2(540.0 - separa, fight_y), fight_l, Color(RED, 0.55))
+		imagem(canvas, FIGHT, Vector2(540.0 + separa, fight_y), fight_l, Color(AZUL, 0.55))
+	imagem(canvas, FIGHT, Vector2(540.0, fight_y), fight_l, Color(1, 1, 1, clampf(desce * 2.0, 0.0, 1.0)))
 
 	if time < T_SUBTITULO:
 		return
 	var desliza := _janela(time, T_SUBTITULO, 0.45)
-	var sub_y := lerpf(1385.0, POUSO_CHALLENGE, smoothstep(0.0, 1.0, morph))
-	var sub_tam := lerpf(93.0, float(POUSO_CHALLENGE_TAM), smoothstep(0.0, 1.0, morph))
+	var sub_y := lerpf(1400.0, NEVER_CENTRO.y, smoothstep(0.0, 1.0, morph))
 	var entra := lerpf(420.0, 0.0, ease(desliza, 0.28))
-	canvas._texto_intro("CHALLENGE", sub_y, sub_tam, POUSO_CHALLENGE_TAM, Color(GOLD, desliza), 60.0 + entra)
-	# O risco de ouro que corre por baixo do subtítulo enquanto ele entra.
+	imagem(canvas, NEVER, Vector2(540.0 + entra, sub_y), NEVER_LARGURA, Color(1, 1, 1, desliza))
 	if desliza < 1.0 and morph <= 0.0:
-		# Abre do centro para os dois lados, acompanhando o subtítulo que
-		# assenta. Crescendo da esquerda parecia uma barra de carregamento.
 		var meia := 470.0 * ease(desliza, 0.3)
 		canvas.draw_line(
-			Vector2(540.0 - meia, sub_y + 28.0), Vector2(540.0 + meia, sub_y + 28.0),
+			Vector2(540.0 - meia, sub_y + 70.0), Vector2(540.0 + meia, sub_y + 70.0),
 			Color(GOLD, 1.0 - desliza * 0.75), 6.0, true
 		)
 

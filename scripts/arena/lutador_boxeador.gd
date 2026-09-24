@@ -941,11 +941,11 @@ func _resolver() -> void:
 		var pol: Vector3 = _polegar[k]
 		G[s + "ForeArm"] = _girar(s + "ForeArm", pulso - cot, pol)
 		O[s + "ForeArm"] = cot
-		var dir_mao: Vector3 = _mao_dir[k]
-		# a mão nunca dobra mais que ~60° do antebraço
+		# PUNHO RETO, como de boxeador: a luva segue o antebraço (é ele
+		# que o punho da luva abraça). Só uma pitada da direção pedida,
+		# para o gesto não ficar duro.
 		var ante := (pulso - cot).normalized()
-		if dir_mao.dot(ante) < 0.5:
-			dir_mao = ante.slerp(dir_mao, 0.5).normalized()
+		var dir_mao: Vector3 = ante.slerp((_mao_dir[k] as Vector3).normalized(), 0.12).normalized()
 		G[s + "Hand"] = _girar(s + "Hand", dir_mao, pol)
 		O[s + "Hand"] = pulso
 	# ---- pernas
@@ -1071,9 +1071,15 @@ func _rosto(dt: float) -> void:
 	var a := 1.0 - exp(-dt * MESCLA_EXPR)
 	for nome in _expr:
 		var alvo := clampf(float(a_expr.get(nome, 0.0)), 0.0, 1.0)
-		var v := lerpf(float(_expr_valor[nome]), alvo, a)
-		_expr_valor[nome] = v
-		_pele.set_blend_shape_value(int(_expr[nome]), v)
+		var antes := float(_expr_valor[nome])
+		var v := lerpf(antes, alvo, a)
+		if v < 0.002 and alvo <= 0.0:
+			v = 0.0
+		# Só mexe no rosto quando mudou: cada troca de peso refaz a malha
+		# deformada na GPU, e o rosto parado não precisa disso.
+		if absf(v - antes) > 0.0005 or (v == 0.0 and antes != 0.0):
+			_expr_valor[nome] = v
+			_pele.set_blend_shape_value(int(_expr[nome]), v)
 
 
 func _raiz() -> void:
