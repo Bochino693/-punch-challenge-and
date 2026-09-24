@@ -83,6 +83,8 @@ var _malhas: Array[MeshInstance3D] = []
 ## --- o estado do corpo (suavizado)
 var _dt := 1.0 / 60.0
 var _centro := Vector2.ZERO          ## x, z do corpo no ringue
+## Até onde, a partir do centro, a lona está livre das cordas (m).
+const RINGUE_LIVRE := 1.40
 var _centro_alvo := Vector2.ZERO
 var _centro_vel := Vector2.ZERO
 var _bacia := Vector3.ZERO           ## posição da bacia
@@ -194,10 +196,28 @@ func montar() -> void:
 		var mat := _pele.mesh.surface_get_material(0) as StandardMaterial3D
 		if mat != null:
 			_mat_pele = mat.duplicate() as StandardMaterial3D
-			_mat_pele.rim_enabled = true
-			_mat_pele.rim = 0.35
-			_mat_pele.rim_tint = 0.6
+			_definir(_mat_pele, 0.50, 0.55)
+			# Pele suada: menos áspera e com o relevo mais marcado — é o
+			# brilho nos músculos que desenha o corpo de longe.
+			_mat_pele.normal_scale = 1.15
 			_pele.set_surface_override_material(0, _mat_pele)
+	# O RESTO DA ROUPA TAMBÉM GANHA CONTORNO. Couro das luvas e das botas,
+	# cetim do calção e o metal do cinturão pegam a luz de recorte: o
+	# personagem se descola do fundo e parece mais nítido sem custar um
+	# pixel a mais de resolução.
+	var feitos := {}
+	for mi in _malhas:
+		if mi == _pele or mi.mesh == null:
+			continue
+		for k in mi.mesh.get_surface_count():
+			var base := mi.mesh.surface_get_material(k) as StandardMaterial3D
+			if base == null:
+				continue
+			if not feitos.has(base):
+				var novo := base.duplicate() as StandardMaterial3D
+				_definir(novo, base.roughness, 0.45)
+				feitos[base] = novo
+			mi.set_surface_override_material(k, feitos[base])
 	_mat_clarao = StandardMaterial3D.new()
 	_mat_clarao.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat_clarao.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -209,6 +229,16 @@ func montar() -> void:
 
 func completo() -> bool:
 	return _pronto
+
+
+## Recorte de luz, textura filtrada de lado e brilho do material: o que faz
+## o lutador "ler" em alta definição na imagem pequena da arena.
+static func _definir(m: StandardMaterial3D, aspereza: float, recorte: float) -> void:
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	m.roughness = aspereza
+	m.rim_enabled = true
+	m.rim = recorte
+	m.rim_tint = 0.55
 
 
 func _mapear() -> void:
@@ -390,9 +420,22 @@ func deslocamento() -> Vector3:
 # ===================================================================
 # O QUADRO
 # ===================================================================
+## O CORPO NÃO ANDA EM CÂMERA LENTA. O passo do corpo tinha teto de
+## 50 ms: numa TV Box rodando a 15–20 quadros por segundo cada quadro
+## perdia um terço do tempo, e a luta inteira ficava lenta. Agora o quadro
+## longo é fatiado em passos de até 1/30 s — as molas continuam estáveis e
+## o relógio da luta anda junto com o relógio do jogo.
+const SUBPASSO := 1.0 / 30.0
+
 func atualizar(delta: float) -> void:
-	_dt = clampf(delta, 0.0, 0.05)
-	super.atualizar(delta)
+	var resto := clampf(delta, 0.0, 0.15)
+	while true:
+		var d := minf(resto, SUBPASSO)
+		_dt = d
+		super.atualizar(d)
+		resto -= d
+		if resto <= 0.0005:
+			break
 
 
 func _mover_o_corpo() -> void:
@@ -541,6 +584,17 @@ func _coreografia(dt: float) -> void:
 	_centro += (_centro_vel + puxa) * dt
 	_centro.x = clampf(_centro.x, -0.55, 0.55)
 	_centro.y = clampf(_centro.y, -0.95, 1.05)
+	# NA QUEDA, OS PÉS ESCORREGAM PARA A FRENTE. O corpo tomba para trás
+	# em volta dos pés; caindo de onde o empurrão do soco o deixou, a
+	# cabeça passava por baixo das cordas e ia parar FORA do ringue. Como
+	# num nocaute de verdade, os pés deslizam para a frente enquanto o
+	# tronco vai para trás — e o corpo inteiro deita dentro da lona.
+	if _queda_vis > 0.0 and _modelo != null:
+		var livre := (ALTURA_DA_FIGURA * 1.02 - RINGUE_LIVRE) / maxf(_modelo.scale.x, 0.01)
+		var junto := clampf(_queda_vis * 1.6, 0.0, 1.0)
+		_centro.y = maxf(_centro.y, lerpf(_centro.y, livre, junto))
+		_centro.x = lerpf(_centro.x, clampf(_centro.x, -0.35, 0.35), junto)
+		_centro_vel.y = maxf(_centro_vel.y, 0.0)
 	a_bacia.x += _centro.x
 	a_bacia.z += _centro.y
 

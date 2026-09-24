@@ -103,6 +103,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     private var systemCameraThread: HandlerThread? = null
     private var systemCameraTexture: SurfaceTexture? = null
     @Volatile private var systemCameraTried = false
+    private val runtimePermissionsAsked = AtomicBoolean(false)
     // A câmera do sistema existe mas não abriu: daí em diante vale a UVC direta.
     @Volatile private var systemCameraFailed = false
 
@@ -306,10 +307,31 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
             // para aparelhos com áudio (toda webcam tem microfone) quando o
             // app não tem RECORD_AUDIO. Sem a caixa, a webcam seria pedida de
             // novo a cada vez que a TV Box liga.
-            val faltam = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-                .filter { host.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-            if (faltam.isNotEmpty()) {
-                host.requestPermissions(faltam.toTypedArray(), CAMERA_PERMISSION_REQUEST)
+            //
+            // E UMA VEZ POR EXECUÇÃO, nunca a cada busca. Esta função roda a
+            // cada poucos segundos enquanto não há câmera; pedir de novo a
+            // cada chamada abria a janela do Android por cima do jogo sem
+            // parar (e cada janela pausa a Activity e derruba a câmera que
+            // estava abrindo). O microfone, que nem é usado, só é pedido
+            // uma vez na vida do aparelho: recusado, fica recusado.
+            if (runtimePermissionsAsked.compareAndSet(false, true)) {
+                val prefs = host.getSharedPreferences("punch_usb", Context.MODE_PRIVATE)
+                val micJaPedido = prefs.getBoolean("mic_pedido", false)
+                val faltam = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+                    .filter { host.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+                    .filter { it != Manifest.permission.RECORD_AUDIO || !micJaPedido }
+                if (faltam.isNotEmpty()) {
+                    if (faltam.contains(Manifest.permission.RECORD_AUDIO)) {
+                        prefs.edit().putBoolean("mic_pedido", true).apply()
+                    }
+                    host.requestPermissions(faltam.toTypedArray(), CAMERA_PERMISSION_REQUEST)
+                    // A janela está aberta: a câmera abre na próxima busca,
+                    // com a Activity de volta ao primeiro plano.
+                    if (faltam.contains(Manifest.permission.CAMERA)) {
+                        cameraStatus = "AUTORIZE A CÂMERA NA JANELA DO ANDROID"
+                        return@runOnUiThread
+                    }
+                }
             }
             // Com a câmera do sistema disponível, não se pede a USB da webcam:
             // quem fala com ela é o próprio Android.

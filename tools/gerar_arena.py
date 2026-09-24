@@ -170,11 +170,16 @@ def lona() -> None:
     c = N / 2
     for r, w, cor in ((350, 16, (255, 42, 176, 235)), (322, 5, (255, 208, 20, 230))):
         d.ellipse([c - r, c - r, c + r, c + r], outline=cor, width=w)
+    # O LOGO FICA ATRÁS DOS PÉS e esticado na profundidade. A câmera vê
+    # a lona quase de lado: no centro exato ele ficava debaixo das botas
+    # e achatado pela perspectiva. Esticado 1,5x no sentido da câmera
+    # (como as marcas pintadas em campo de futebol) e recuado, ele se lê
+    # inteiro atrás do lutador, entre as pernas e as cordas.
     logo = Image.open(RAIZ / "assets" / "tema" / "logo.png").convert("RGBA")
-    lw = 560
-    lh = int(logo.height * lw / logo.width)
+    lw = 780
+    lh = int(logo.height * lw / logo.width * 1.5)
     logo = logo.resize((lw, lh), Image.LANCZOS)
-    em.alpha_composite(logo, (int(c - lw / 2), int(c - lh / 2)))
+    em.alpha_composite(logo, (int(c - lw / 2), int(c - lh / 2 - 175)))
     ema = np.asarray(em, np.float32) / 255.0
     # Tinta sobre tecido: um pouco gasta, nunca adesivo chapado.
     gasto = np.clip(1.0 - np.abs(nd.gaussian_filter(rng.normal(0, 1, (N, N)), 3)) * 0.6, 0.55, 1.0)

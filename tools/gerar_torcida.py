@@ -6,6 +6,9 @@ Saídas:
   assets/audio/arcade/torcida_vaia.wav   vaia longa ("uuuuh") + apitos, sintetizada
   assets/audio/arcade/torcida_festa.wav  festa longa, emendando as gravações CC0
                                           que já estão no projeto
+  assets/audio/arcade/torcida_incentivo.wav  a torcida EMPURRANDO no meio da luta:
+                                          palmas ritmadas, "VAI! VAI!" em coro e
+                                          a plateia gravada por baixo
   assets/arena/torcida_baixo.png         plateia de braços baixos
   assets/arena/torcida_cima.png          a MESMA plateia, braços para o alto
 
@@ -119,6 +122,63 @@ def festa():
     return out * fim
 
 
+def incentivo(duracao=4.2):
+    """O coro que empurra quem está batendo: "VAI! VAI! VAI!" com palmas.
+
+    Nada de vaia aqui — vaia é só do fim, de quem perdeu. No meio da luta
+    a torcida está do lado do jogador."""
+    n = int(SR * duracao)
+    t = np.arange(n) / SR
+    mix = np.zeros((n, 2))
+    batida = 60 / 150
+    inicios = np.arange(0.18, duracao - 0.6, batida * 2)
+    for _ in range(46):
+        f0 = rng.uniform(130, 230) if rng.random() < 0.7 else rng.uniform(210, 330)
+        atraso = rng.normal(0, 0.025)
+        voz = np.zeros(n)
+        for k, ini in enumerate(inicios):
+            ini += atraso
+            dur = batida * rng.uniform(0.62, 0.8)
+            m = (t >= ini) & (t < ini + dur)
+            tt = np.clip(t - ini, 0, None)
+            # "vai": do /a/ para o /i/, com o tom subindo no fim do grito
+            fase = np.cumsum(f0 * (1 + 0.10 * np.clip(tt / dur, 0, 1))) / SR
+            glote = 2 * (fase % 1) - 1
+            env = np.clip(tt / 0.035, 0, 1) * np.clip((ini + dur - t) / 0.08, 0, 1) * m
+            voz += glote * env
+        # formantes: /a/ (730, 1090) indo para /i/ (300, 2300) — mistura fixa
+        # das duas bocas; o ouvido lê o ditongo na média de 46 vozes
+        voz = formante(voz, rng.uniform(640, 760), 5) + formante(voz, rng.uniform(1050, 1250), 7) * 0.5 \
+            + formante(voz, rng.uniform(2100, 2500), 10) * 0.18
+        pan = rng.uniform(0.1, 0.9)
+        g = rng.uniform(0.4, 1.0)
+        mix[:, 0] += voz * g * (1 - pan)
+        mix[:, 1] += voz * g * pan
+    # palmas no contratempo do coro
+    palmas = np.zeros((n, 2))
+    k = 0.18 + batida
+    while k < duracao - 0.4:
+        for _ in range(18):
+            i = int((k + rng.normal(0, 0.012)) * SR)
+            m = min(n - i, int(0.05 * SR))
+            if m <= 0:
+                continue
+            pan = rng.uniform(0, 1)
+            c = rng.standard_normal(m) * np.exp(-np.arange(m) / (0.009 * SR)) * rng.uniform(0.5, 1)
+            palmas[i:i + m, 0] += c * (1 - pan)
+            palmas[i:i + m, 1] += c * pan
+        k += batida
+    palmas = signal.lfilter(*signal.butter(2, [800, 6000], "bandpass", fs=SR), palmas, axis=0)
+    mix = mix / (np.abs(mix).max() + 1e-9) + palmas / (np.abs(palmas).max() + 1e-9) * 0.55
+    publico = ler("arena_publico.wav")
+    cama = np.zeros((n, 2))
+    m = min(n, len(publico))
+    cama[:m] = publico[:m]
+    mix = mix + cama * 0.5
+    fim = np.clip((duracao - t) / 0.7, 0, 1)[:, None] * np.clip(t / 0.08, 0, 1)[:, None]
+    return reverb(mix * fim, 1.1, 0.24)
+
+
 # ------------------------------------------------------------ plateia
 def plateia():
     L, A = 2048, 512
@@ -166,4 +226,5 @@ def plateia():
 if __name__ == "__main__":
     gravar("torcida_vaia.wav", vaia())
     gravar("torcida_festa.wav", festa())
+    gravar("torcida_incentivo.wav", incentivo())
     plateia()

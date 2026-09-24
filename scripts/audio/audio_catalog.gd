@@ -35,6 +35,8 @@ const EXTRA := [
 	# A torcida longa do fim de rodada: vaia (o jogador perdeu e o
 	# lutador tira onda) e festa (o jogador ganhou, o ginásio pega fogo).
 	"torcida_vaia", "torcida_festa",
+	# E a torcida do MEIO da luta: empurra quem está batendo, nunca vaia.
+	"torcida_incentivo",
 	# Vozes especiais da rodada de dois golpes.
 	"not_supress", "good_player",
 ]
