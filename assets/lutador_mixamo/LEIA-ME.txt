@@ -1,0 +1,31 @@
+LUTADOR EXTERNO (troca o boxeador sem mexer em código)
+======================================================
+
+Coloque nesta pasta um personagem com esqueleto Mixamo e as animações.
+Com o arquivo "personagem" + a animação "guarda" aqui, o jogo usa este
+lutador no lugar do boxeador gerado. Sem eles, nada muda.
+
+Caminho mais fácil (grátis): https://www.mixamo.com (conta Adobe)
+  1. Characters: escolha o personagem. Download: FBX Binary, "With Skin",
+     Pose T-pose.  Salve aqui como  personagem.fbx
+  2. Animations (com o MESMO personagem selecionado), marque "In Place"
+     quando existir, Download: FBX Binary, "Without Skin", 30 fps.
+     Salve cada uma com o nome abaixo:
+
+       guarda.fbx       Boxing Idle / Bouncing Fight Idle   (OBRIGATÓRIA)
+       golpe_leve.fbx   Head Hit / Light Hit To Head
+       golpe_forte.fbx  Big Hit To Head / Hit To Body
+       cordas.fbx       Stunned / Hit Reaction (recuando)
+       nocaute.fbx      Knocked Out / Knocked Down
+       levantar.fbx     Getting Up / Stand Up
+       comemora.fbx     Victory / Victory Idle
+       deboche.fbx      Taunt / Taunt Gesture
+       soco_tela.fbx    Cross Punch / Hook Punch
+       tonto.fbx        Dizzy Idle
+
+  Só "guarda" é obrigatória; faltando alguma, o jogo usa a mais parecida.
+  Também servem .glb (Sketchfab, Blender) com esqueleto Mixamo.
+
+Depois é só gerar o APK como sempre. O jogo ajusta sozinho a altura, vira
+o personagem de frente para a câmera, põe os pés no chão e veste luvas
+de boxe vermelhas.

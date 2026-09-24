@@ -317,7 +317,11 @@ const ESCALA_DO_SENSOR := 10
 ## O 8 é o de soco de verdade: teto 8 m/s, contraste 1,70 e âncora a
 ## 56,5% da faixa (3 m/s ~ 750, 4 ~ 2300, 5 ~ 4700, 6 ~ 7400, 7 ~ 9300),
 ## mais a variação de `ScoreCurve.variar`. Passar de 8000 é para poucos.
-const ESQUEMA_DA_PONTUACAO := 8
+## O 9 (build 82) é mais generoso no meio e continua duro em cima:
+## âncora a 46% da faixa e contraste 1,35 (3 m/s ~ 3500, 4 ~ 5200,
+## 5 ~ 6900, 6 ~ 8300 antes da "parede dos 8000"). A migração também
+## derruba um piso que a régua automática tenha empurrado para cima.
+const ESQUEMA_DA_PONTUACAO := 9
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 ## O PULSO MÍNIMO EM MILISSEGUNDOS que a placa recebe no CONFIG.
@@ -4948,6 +4952,7 @@ func _carregar() -> void:
 			# O teto de cada esquema antigo era fácil demais para um jogo de
 			# soco: o do esquema 8 vale para todos.
 			hit_max_speed = maxf(hit_max_speed, ScoreCurve.DEFAULT_MAX_SPEED)
+			hit_min_speed = minf(hit_min_speed, 0.60)
 			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
@@ -6024,8 +6029,12 @@ func _draw_campo_de_forca(centro: Vector2, cor: Color, progresso: float, no_impa
 	# inteira com a cor do nível; o miolo fica escondido atrás da arena,
 	# então o que se vê é o halo escapando em volta da moldura — que é
 	# exatamente o efeito que se quer, luz saindo de trás do quadro.
-	for i in range(2):
-		draw_circle(centro, 600.0 + float(i) * 190.0, Color(cor, 0.040 * forca), true, -1.0, true)
+	# Na TV Box os discos saem: cada um cobre mais de um milhão de pixels
+	# translúcidos (a placa de vídeo pinta a tela duas vezes a mais por
+	# quadro). Os raios abaixo já fazem o halo.
+	if not OS.has_feature("mobile"):
+		for i in range(2):
+			draw_circle(centro, 600.0 + float(i) * 190.0, Color(cor, 0.040 * forca), true, -1.0, true)
 	# E OS RAIOS COMEÇAM FORA DA MOLDURA. Nascendo no centro eles
 	# cruzariam a imagem do lutador; nascendo na borda, viram o brilho de
 	# um telão empurrando luz para os cantos da tela.
