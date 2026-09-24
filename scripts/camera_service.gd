@@ -166,11 +166,7 @@ func _despertar_passo(agora: int) -> bool:
 			_preparar_android_usb()
 		1:
 			Diario.marca("CAMERA: servidor de camera")
-			_acordar_servidor()
-			if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
-				CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
-			if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
-				CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
+			_ligar_servidor()
 		2:
 			if OS.get_name() != "Android":
 				_pedir_permissao_android()
@@ -183,7 +179,7 @@ func _despertar_passo(agora: int) -> bool:
 			# abre a câmera depois de confirmar a permissão.
 			_ja_montada = true
 			_etapa_despertar = -1
-			Diario.marca("CAMERA: pronta para pedir permissao")
+			Diario.marca("CAMERA: pronta")
 			return false
 	_etapa_despertar += 1
 	return true
@@ -212,39 +208,51 @@ var _permissoes_ok := false
 var _permissoes_pedidas := false
 var _permissoes_conferidas_ms := 0
 
-## A PERMISSÃO DA CÂMERA, SIMPLES: só CÂMERA (sem microfone), uma janela,
-## pedida uma vez assim que o jogo termina de carregar. Autorizada, a câmera
-## abre e não para mais.
-var _pedido_em_ms := 0
+## A PERMISSÃO DA CÂMERA É PEDIDA NO CARREGAMENTO (`carregador.gd`),
+## antes de qualquer outra coisa — câmera, depois Arduino, uma de cada vez.
+## Aqui dentro do jogo NUNCA se abre janela de permissão: só se confere,
+## a cada 2 s, se ela já foi dada. Dada, a câmera abre e não para mais.
+const CONFERIR_PERMISSAO_MS := 2000
+
+func _tem_permissao_da_camera() -> bool:
+	return OS.get_name() != "Android" \
+		or OS.get_granted_permissions().has("android.permission.CAMERA")
 
 func permissao_resolvida() -> bool:
-	if OS.get_name() != "Android" or _permissoes_ok or not enabled:
-		return true
-	# Pedida e sem resposta há muito tempo: não segura o resto da máquina.
-	return _permissoes_pedidas and Time.get_ticks_msec() - _pedido_em_ms > 15000
+	# O carregador já perguntou tudo; o jogo não espera por janela nenhuma.
+	return true
 
 func _passo_das_permissoes(agora: int) -> bool:
 	if _permissoes_ok or OS.get_name() != "Android":
 		return true
 	if agora < _permissoes_conferidas_ms:
 		return false
-	_permissoes_conferidas_ms = agora + 700
-	if OS.get_granted_permissions().has("android.permission.CAMERA"):
+	_permissoes_conferidas_ms = agora + CONFERIR_PERMISSAO_MS
+	if _tem_permissao_da_camera():
 		_permissoes_ok = true
 		status = "CÂMERA AUTORIZADA — ABRINDO…"
 		Diario.marca("CAMERA: permissao ok, abrindo")
+		_ligar_servidor()
 		if enabled:
 			iniciar_captura()
 		Diario.marca("CAMERA: abertura pedida")
 		return true
 	if not _permissoes_pedidas:
 		_permissoes_pedidas = true
-		_pedido_em_ms = agora
-		Diario.marca("CAMERA: pedindo permissao")
-		OS.request_permission("CAMERA")
-		Diario.marca("CAMERA: janela de permissao pedida")
-	status = "AUTORIZE A CÂMERA NA JANELA DO ANDROID"
+		Diario.marca("CAMERA: sem permissao (negada no carregamento)")
+	status = "CÂMERA SEM PERMISSÃO — AUTORIZE NAS CONFIGURAÇÕES DO ANDROID"
 	return false
+
+## Liga o CameraServer e escuta as câmeras que entram/saem. No Android só
+## DEPOIS da permissão: ligar antes travava a TV Box na abertura.
+func _ligar_servidor() -> void:
+	if not _tem_permissao_da_camera():
+		return
+	_acordar_servidor()
+	if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
+		CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
+	if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
+		CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
 
 func _pedir_permissao_android() -> void:
 	if OS.get_name() != "Android":
@@ -252,8 +260,6 @@ func _pedir_permissao_android() -> void:
 	# A permissao declarada no APK ainda precisa ser aceita pelo operador.
 	# A chamada e assincrona; a busca periodica adotara o feed assim que o
 	# Android o publicar, sem pausar a animacao nem o audio.
-	if not OS.get_granted_permissions().has("android.permission.CAMERA"):
-		OS.request_permission("CAMERA")
 	_requisitar_webcam_usb_android(true)
 
 func _preparar_android_usb() -> void:
@@ -755,6 +761,8 @@ func _on_camera_feeds_updated(_id: int = 0) -> void:
 		call_deferred("_adotar_camera_usb_preferida")
 
 func _acordar_servidor() -> void:
+	if not _tem_permissao_da_camera():
+		return
 	if CameraServer.has_method("set_monitoring_feeds"):
 		CameraServer.call("set_monitoring_feeds", true)
 

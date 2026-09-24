@@ -12,7 +12,7 @@ extends RefCounted
 ## NUMERO em um e escreva em NOTA o que mudou. Um carimbo que não sobe
 ## mente, e um carimbo que mente é pior do que carimbo nenhum.
 
-const NUMERO := 84
+const NUMERO := 85
 const DATA := "24/09/2026"
 const NOTA := "câmera e Arduino só depois da abertura, em etapas; diário da inicialização; logos nítidas"
 
