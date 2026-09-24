@@ -705,7 +705,11 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         // reconectada, e a próxima abertura merece tentar tudo de novo.
         systemCameraFailed = false
         uvcDiretaFalhou = ""
-        cameraCountAt = 0L
+        // A CONTAGEM DE CÂMERAS NÃO É ZERADA. Zerada, o `startUvcCamera`
+        // seguinte voltava sem abrir ("contagem ainda vindo") e o vigia do
+        // jogo parava de novo antes de ela chegar: a câmera ficava num
+        // ciclo de parar/ligar sem nunca abrir. A contagem se renova
+        // sozinha a cada 1,5 s em segundo plano.
         // Soltar a câmera pode demorar: sempre na thread de quem a abriu.
         val cameraThread = systemCameraThread
         if (cameraThread != null) Handler(cameraThread.looper).post { stopSystemCamera() } else stopSystemCamera()

@@ -24,17 +24,27 @@ const PACIENCIA_DO_ARDUINO_MS := 15000
 
 static var _foco := true
 static var _foco_voltou_ms := 0
+static var _foco_perdido_ms := 0
+## SEM FOCO POR MAIS QUE ISTO, SEGUE A VIDA. Algumas TV Boxes não avisam
+## o jogo quando o foco volta; esperar o aviso para sempre deixava câmera
+## e Arduino parados. Janela de verdade na frente dura poucos segundos.
+const FOCO_PERDIDO_MAXIMO_MS := 6000
 static var _arduino_resolvido := false
 static var _inicio_ms := -1
 
 static func foco(tem: bool) -> void:
 	if tem and not _foco:
 		_foco_voltou_ms = Time.get_ticks_msec()
+	if not tem and _foco:
+		_foco_perdido_ms = Time.get_ticks_msec()
 	_foco = tem
 
 ## Pode mexer em USB e em câmera agora?
 static func livre() -> bool:
-	return _foco and Time.get_ticks_msec() - _foco_voltou_ms >= RESPIRO_MS
+	var agora := Time.get_ticks_msec()
+	if not _foco:
+		return agora - _foco_perdido_ms >= FOCO_PERDIDO_MAXIMO_MS
+	return agora - _foco_voltou_ms >= RESPIRO_MS
 
 ## O Arduino respondeu (ou o jogo desistiu de esperar por ele).
 static func arduino_resolvido() -> void:

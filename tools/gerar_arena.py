@@ -176,10 +176,12 @@ def lona() -> None:
     # (como as marcas pintadas em campo de futebol) e recuado, ele se lê
     # inteiro atrás do lutador, entre as pernas e as cordas.
     logo = Image.open(RAIZ / "assets" / "tema" / "logo.png").convert("RGBA")
-    lw = 780
-    lh = int(logo.height * lw / logo.width * 1.5)
+    lw = 700
+    lh = int(logo.height * lw / logo.width * 1.35)
     logo = logo.resize((lw, lh), Image.LANCZOS)
-    em.alpha_composite(logo, (int(c - lw / 2), int(c - lh / 2 - 175)))
+    # NO MEIO DO RINGUE, como nas lonas de verdade: o lutador luta em cima
+    # da marca.
+    em.alpha_composite(logo, (int(c - lw / 2), int(c - lh / 2)))
     ema = np.asarray(em, np.float32) / 255.0
     # Tinta sobre tecido: um pouco gasta, nunca adesivo chapado.
     gasto = np.clip(1.0 - np.abs(nd.gaussian_filter(rng.normal(0, 1, (N, N)), 3)) * 0.6, 0.55, 1.0)

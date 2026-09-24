@@ -38,7 +38,14 @@ SAIDA = RAIZ / "assets" / "lutador3d" / "boxeador.glb"
 FONTE = str(RAIZ / "assets" / "fonts" / "Bungee-Regular.ttf")
 CACHE = Path(__file__).resolve().parent / ".cache_boxeador.npz"
 
-TEX_PELE = 4096
+# TV BOX PRIMEIRO: pele em 2048 (o lutador ocupa ~500 px de altura na
+# tela; 4096 só custava memória de vídeo e tempo de carregamento).
+TEX_PELE = 2048
+# O corpo sem subdivisão (~15 mil triângulos): a subdivisão Loop quadruplicava
+# a malha (62 mil) para um ganho que não aparece no quadro da arena.
+# BOXEADOR_SUBDIVIDIR=1 volta a subdividir (para PC).
+import os as _os
+SUBDIVIDIR = _os.environ.get("BOXEADOR_SUBDIVIDIR", "0") == "1"
 TEX_ROUPA = 2048
 rng = np.random.default_rng(20260924)
 
@@ -435,6 +442,16 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
     corpo_sd = _sd_caixa_redonda(loc, A(0.0, -0.004, 0.112), A(0.055, 0.049, 0.080), 0.036 * s)
     costura = (np.abs(pol) < 0.004 * s) & (np.abs(corpo_sd) < 0.004 * s) & (z > 0.02)
     cor[costura] = [0.45, 0.015, 0.035]
+    # SOMBRA EMBUTIDA NA COR: o vermelho saturado com a luz de frente
+    # quase uniforme apagava a forma da luva (ela lia como um recorte
+    # chapado). Mais escuro embaixo e nas laterais, mais claro no dorso e
+    # nos nós dos dedos — a forma aparece com qualquer luz.
+    nn = nrm / (np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-9)
+    dorso = np.clip(-nn[:, 1], 0, 1)              # -y é o dorso (y = palma)
+    frente = np.clip(nn[:, 2], 0, 1)              # nós dos dedos
+    lado = np.abs(nn[:, 0])
+    luz = 0.62 + 0.30 * dorso + 0.18 * frente - 0.16 * lado
+    cor = (cor * np.clip(luz, 0.45, 1.1)[:, None]).astype(np.float32)
     mundo = loc @ base.T + pulso
     return mundo.astype(np.float32), faces, (nrm @ base.T).astype(np.float32), cor
 
@@ -533,7 +550,7 @@ def bota(pos, lado):
     hi = np.array([0.075 * s, topo[1] + 0.03 * s, 0.215 * s])
     # Passo do campo maior: metade dos triângulos (a TV Box agradece) com
     # a mesma forma — o detalhe fino (cadarço, frisos) vem da cor.
-    loc, faces, nrm = _malha_do_campo(campo, lo, hi, 0.0046 * s)
+    loc, faces, nrm = _malha_do_campo(campo, lo, hi, 0.0062 * s)
     y = loc[:, 1]
     cor = np.tile(np.array([0.035, 0.033, 0.04], np.float32), (len(loc), 1))
     ruido = np.sin(loc[:, 0] * 900) * np.sin(loc[:, 2] * 700) * 0.01
@@ -1059,7 +1076,10 @@ def construir(pintar=True):
     expr = para_gltf(d["expressoes"])            # (E, V, 3)
     ne_ = expr.shape[0]
     canal_expr = np.transpose(expr, (1, 0, 2)).reshape(len(v), -1)
-    v2, f2, fuv2, uv2, (w2, e2) = subdividir(v, fp, fuvp, uv, canais=(w, canal_expr))
+    if SUBDIVIDIR:
+        v2, f2, fuv2, uv2, (w2, e2) = subdividir(v, fp, fuvp, uv, canais=(w, canal_expr))
+    else:
+        v2, f2, fuv2, uv2, w2, e2 = v, fp, fuvp, uv, w, canal_expr
     n2 = normais(v2, f2)
     vi, ti, ind = separar_uv(f2, fuv2)
     p = v2[vi]

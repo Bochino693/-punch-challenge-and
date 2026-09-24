@@ -80,13 +80,18 @@ const PASSO_MAXIMO := 0.12
 
 ## Os percentis de cada âncora.
 const P_MINIMO := 0.05
-const P_REFERENCIA := 0.70
+## O SOCO DE REFERÊNCIA (o que paga 5000) é o do percentil 42: um soco
+## comum, bem dado, chega lá. No percentil 70 sete em cada dez socos
+## ficavam abaixo de 5000 e a máquina parecia "sempre fraca".
+const P_REFERENCIA := 0.42
 const P_MAXIMO := 0.97
 
 ## Folgas depois do percentil. O piso desce (quem bate fraco precisa ver
 ## algum ponto) e o teto sobe (9999 tem de continuar sendo conquistado, e
 ## não entregue ao melhor soco já medido).
-const FOLGA_PISO := 0.80
+## O piso também vai para a placa como limite de descarte: com folga
+## pequena, soco mais leve nem era aceito ("o sensor quase não aciona").
+const FOLGA_PISO := 0.55
 const FOLGA_TETO := 1.12
 
 ## A memória, em m/s, do mais antigo para o mais novo.

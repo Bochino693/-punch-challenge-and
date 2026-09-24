@@ -172,8 +172,11 @@ func _passo_das_permissoes(agora: int) -> bool:
 	if OS.get_granted_permissions().has("android.permission.CAMERA"):
 		_permissoes_ok = true
 		status = "CÂMERA AUTORIZADA — PROCURANDO…"
+		# O caminho completo de abertura, igual ao do arranque de antes:
+		# câmera do sistema, webcam USB e CameraServer.
+		if enabled:
+			iniciar_captura()
 		_requisitar_webcam_usb_android(true)
-		_iniciar_uvc_android()
 		return true
 	if _permissoes_pedidas or not Porteiro.vez_da_camera():
 		status = "AGUARDANDO O ARDUINO PARA PEDIR A CÂMERA" if not _permissoes_pedidas else "AUTORIZE A CÂMERA NA JANELA DO ANDROID"
@@ -245,9 +248,9 @@ func _process(_delta: float) -> void:
 	if not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
 		return
 	var agora := Time.get_ticks_msec()
-	# Janela do Android na frente, ou câmera ainda sem autorização: nada
-	# de mexer em câmera (cada chamada aqui fala com USB).
-	if not _passo_das_permissoes(agora) or not Porteiro.livre():
+	# Câmera ainda sem autorização: nada a abrir. (Autorizada, a câmera
+	# anda sempre — só os PEDIDOS de janela esperam o Porteiro.)
+	if not _passo_das_permissoes(agora):
 		return
 	_vigiar_webcam_android(agora)
 	# Em muitas TV boxes a webcam recebe permissão, mas nunca aparece no
@@ -293,6 +296,14 @@ func _vigiar_webcam_android(agora: int) -> void:
 	if _uvc_quadro_ms > 0 and agora - _uvc_quadro_ms < paciencia:
 		return
 	if agora < _uvc_proximo_religar_ms:
+		return
+	# AINDA SEM VÍDEO NENHUM: só insiste em abrir, sem parar antes. Parar
+	# uma câmera que nem abriu zerava o estado do plugin e fazia a próxima
+	# abertura voltar vazia — era o ciclo em que ela nunca abria sozinha.
+	if not _uvc_teve_video:
+		_uvc_proximo_religar_ms = agora + 3000
+		_android_bridge.call("startUvcCamera")
+		_requisitar_webcam_usb_android(true)
 		return
 	if _uvc_parada:
 		_uvc_parada = false

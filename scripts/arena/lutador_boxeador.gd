@@ -213,11 +213,22 @@ func montar() -> void:
 			var base := mi.mesh.surface_get_material(k) as StandardMaterial3D
 			if base == null:
 				continue
-			if not feitos.has(base):
+			# Casca fina (calção, cinturão, friso): duas faces. Luvas e botas
+			# são sólidos fechados e ficam com uma.
+			var casca := mi.name in ["Calcao", "Cinturao", "Friso"]
+			var chave := [base, casca]
+			if not feitos.has(chave):
 				var novo := base.duplicate() as StandardMaterial3D
-				_definir(novo, base.roughness, 0.45)
-				feitos[base] = novo
-			mi.set_surface_override_material(k, feitos[base])
+				var luva := mi.name.begins_with("Luva")
+				# Couro da luva: menos recorte e menos espelho — com muito
+				# dos dois ela estourava num vermelho chapado.
+				_definir(novo, maxf(base.roughness, 0.42) if luva else base.roughness, 0.18 if luva else 0.45, casca)
+				if luva:
+					# o vermelho vivo da cor de vértice estourava no lado
+					# iluminado: um pouco mais escuro, a forma aparece.
+					novo.albedo_color = Color(0.72, 0.72, 0.72)
+				feitos[chave] = novo
+			mi.set_surface_override_material(k, feitos[chave])
 	_mat_clarao = StandardMaterial3D.new()
 	_mat_clarao.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat_clarao.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -233,8 +244,14 @@ func completo() -> bool:
 
 ## Recorte de luz, textura filtrada de lado e brilho do material: o que faz
 ## o lutador "ler" em alta definição na imagem pequena da arena.
-static func _definir(m: StandardMaterial3D, aspereza: float, recorte: float) -> void:
+static func _definir(m: StandardMaterial3D, aspereza: float, recorte: float, dois_lados := false) -> void:
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	# Opaco SEMPRE, e as cascas (calção, cinturão, luvas, botas) com as
+	# duas faces: vista por baixo ou pela perna, a face de dentro sumia e
+	# o calção parecia transparente.
+	m.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	if dois_lados:
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.roughness = aspereza
 	m.rim_enabled = true
 	m.rim = recorte
@@ -441,9 +458,13 @@ func deslocamento() -> Vector3:
 ## longo é fatiado em passos de até 1/30 s — as molas continuam estáveis e
 ## o relógio da luta anda junto com o relógio do jogo.
 const SUBPASSO := 1.0 / 30.0
+## O RITMO DA LUTA: o corpo inteiro anda 30% mais rápido que o relógio —
+## guarda, passos, reações e comemoração. No tempo "real" o boxeador
+## parecia em câmera lenta na tela da máquina.
+const VELOCIDADE := 1.3
 
 func atualizar(delta: float) -> void:
-	var resto := clampf(delta, 0.0, 0.15)
+	var resto := clampf(delta, 0.0, 0.15) * VELOCIDADE
 	while true:
 		var d := minf(resto, SUBPASSO)
 		_dt = d

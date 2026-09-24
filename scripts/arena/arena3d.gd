@@ -46,6 +46,10 @@ const TEX_TORCIDA_CIMA := "res://assets/arena/torcida_cima.png"
 
 ## A PLATEIA MEXE. Colunas de gente pulam e levantam os braços conforme
 ## `agito`; o telão de LED do fundo rola devagar o tempo todo.
+## A TORCIDA NUNCA FICA PARADA. Uma plateia de ginásio mexe o tempo todo:
+## cada coluna de gente balança no seu ritmo, braços sobem e descem em
+## ondas ("ola") e, quando o golpe entra (`agito`), todo mundo pula. Tudo
+## no shader: nenhum custo de processador.
 const SHADER_TORCIDA := """
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never;
@@ -56,17 +60,21 @@ uniform float tempo = 0.0;
 uniform float acende = 1.0;
 void fragment() {
 	vec2 uv = UV;
+	float vida = 0.40 + agito * 0.60;
 	float col = floor(uv.x * 72.0);
 	float r = fract(sin(col * 78.233) * 43758.5453);
-	float pulo = max(0.0, sin(tempo * (6.5 + r * 4.0) + r * 6.2831)) * agito;
-	uv.y += pulo * 0.045 * (0.6 + r * 0.4);
-	uv.x += sin(tempo * 2.3 + r * 9.0) * 0.0025 * agito;
+	float pulo = max(0.0, sin(tempo * (3.2 + r * 3.8 + agito * 3.0) + r * 6.2831));
+	uv.y += pulo * (0.018 + 0.030 * agito) * (0.6 + r * 0.4);
+	uv.x += sin(tempo * (1.2 + r) + r * 9.0) * 0.004 * vida;
 	vec4 a = texture(baixo, uv);
 	vec4 b = texture(cima, uv);
-	float mao = step(0.55, 0.5 + 0.5 * sin(tempo * (3.0 + r * 2.0) + r * 12.0)) * step(0.35 - agito * 0.3, r) * step(0.05, agito);
+	float ola = 0.5 + 0.5 * sin(UV.x * 7.0 - tempo * 1.7);
+	float braco = 0.5 + 0.5 * sin(tempo * (2.6 + r * 2.2) + r * 12.0);
+	float mao = step(0.5, braco * (0.35 + 0.65 * ola) + agito * 0.45) * step(0.30 - agito * 0.25, r);
 	vec4 c = mix(a, b, mao);
-	ALBEDO = c.rgb * acende * (1.0 + agito * 0.35);
-	ALPHA = c.a * (0.75 + 0.25 * agito);
+	float celular = step(0.992, fract(sin(col * 12.9898 + floor(tempo * 2.5 + r * 7.0) * 3.7) * 43758.5)) * step(0.5, UV.y) * c.a;
+	ALBEDO = c.rgb * acende * (1.0 + agito * 0.35) + vec3(0.9, 0.95, 1.0) * celular * 1.5;
+	ALPHA = c.a * (0.80 + 0.20 * agito);
 }
 """
 const SHADER_FUNDO := """
@@ -464,7 +472,9 @@ func instalar() -> bool:
 	# O LUTADOR 3D. Primeiro o boxeador (`LutadorBoxeador3D`, corpo humano
 	# com IK e expressões); se o arquivo dele faltar, o guerreiro animado
 	# (`LutadorAnimado3D`) e, por fim, o Vanguard posado em código.
-	for tipo in [LutadorBoxeador3D, LutadorAnimado3D, LutadorModelo3D]:
+	# Um lutador externo (Mixamo/Sketchfab) em `assets/lutador_mixamo/`
+	# tem preferência; sem ele, o boxeador gerado.
+	for tipo in [LutadorMixamo3D, LutadorBoxeador3D, LutadorAnimado3D, LutadorModelo3D]:
 		var modelo: Lutador3D = tipo.new()
 		modelo.name = "Lutador"
 		modelo.position.y = PISO_DO_LUTADOR
@@ -510,6 +520,11 @@ func _aplicar_tamanho() -> void:
 	# A RESOLUÇÃO NÃO CAI MAIS quando a máquina aperta: imagem encolhida
 	# e esticada é o "boneco em baixa resolução". O que cede é o MSAA.
 	var fator := _fator_da_tela()
+	# NA TV BOX A ARENA RENDERIZA A 85% (72% quando o vigia aperta) e é
+	# ampliada no quadro: um terço a menos de pixels para a placa de vídeo
+	# pintar, a diferença mais sentida no "jogo lento".
+	if OS.has_feature("mobile"):
+		fator *= 0.72 if _magro else 0.85
 	var novo := Vector2i((TELA_LOGICA * fator).round())
 	if size != novo:
 		size = novo
