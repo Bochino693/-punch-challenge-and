@@ -1,2 +1,9 @@
 # Normalize EOL for all files that Git considers text files.
 * text=auto eol=lf
+
+# Scripts do Windows SEMPRE com quebra de linha do Windows (CRLF), guardados
+# assim no repositorio e baixados assim em qualquer maquina. Com quebra de
+# linha de Linux o cmd.exe le errado blocos com parenteses e fecha sozinho.
+*.bat -text
+*.cmd -text
+*.ps1 -text
