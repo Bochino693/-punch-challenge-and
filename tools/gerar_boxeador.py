@@ -415,7 +415,7 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
         d = _uniao(d, cano, 0.035 * s)
         return np.minimum(d, faixa)
 
-    loc, faces, nrm = _malha_do_campo(campo, A(-0.085, -0.085, -0.10), A(0.085, 0.085, 0.215), 0.0045 * s)
+    loc, faces, nrm = _malha_do_campo(campo, A(-0.085, -0.085, -0.10), A(0.085, 0.085, 0.215), 0.0058 * s)
     z = loc[:, 2] / s
     cor = np.tile(np.array([0.74, 0.025, 0.05], np.float32), (len(loc), 1))
     cor[z < 0.0] = [0.93, 0.93, 0.92]                            # punho branco
@@ -424,11 +424,17 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
     for a, b in ((-0.046, -0.042), (-0.031, -0.027)):
         cor[(z > a) & (z < b)] = [0.95, 0.95, 0.94]              # frisos brancos
     cor[z < -0.074] = [0.12, 0.10, 0.12]                          # borda do punho
-    palma = (loc[:, 1] / s > 0.034) & (z > 0.03)
-    cor[palma] = [0.55, 0.02, 0.04]                              # palma mais escura
-    # costura do polegar: fio escuro onde o polegar encontra o corpo
+    # Palma um pouco mais escura, em degradê (a mancha chapada de antes
+    # parecia um buraco na luva).
+    palma = np.clip((loc[:, 1] / s - 0.030) / 0.030, 0, 1) * np.clip((z - 0.03) / 0.03, 0, 1)
+    cor = cor * (1 - 0.08 * palma[:, None]).astype(np.float32)
+    # costura do polegar: fio escuro SÓ onde o polegar encontra o corpo.
+    # (Antes a conta pegava todo ponto na superfície do polegar — ele
+    # inteiro ficava escuro e parecia uma mancha chapada na luva.)
     pol = _sd_cone_redondo(loc, A(0.052, 0.020, 0.050), A(0.047, 0.030, 0.128), 0.0215 * s, 0.019 * s)
-    cor[(np.abs(pol) < 0.0035 * s) & (z > 0.02)] = [0.35, 0.01, 0.03]
+    corpo_sd = _sd_caixa_redonda(loc, A(0.0, -0.004, 0.112), A(0.055, 0.049, 0.080), 0.036 * s)
+    costura = (np.abs(pol) < 0.004 * s) & (np.abs(corpo_sd) < 0.004 * s) & (z > 0.02)
+    cor[costura] = [0.45, 0.015, 0.035]
     mundo = loc @ base.T + pulso
     return mundo.astype(np.float32), faces, (nrm @ base.T).astype(np.float32), cor
 
@@ -466,8 +472,11 @@ def bota(pos, lado):
         return d2
 
     def solado(P):
-        d2 = pegada(P) + 0.004 * s
-        dy = np.abs(P[..., 1] - 0.011 * s) - 0.011 * s
+        # A SOLA ACOMPANHA A BOTA: um fio para dentro do contorno, fina.
+        # Mais larga e branca, ela virava uma prancha saindo do pé toda
+        # vez que o pé inclinava.
+        d2 = pegada(P) + 0.0015 * s
+        dy = np.abs(P[..., 1] - 0.008 * s) - 0.008 * s
         return np.maximum(d2, dy)
 
     def cabedal(P):
@@ -522,13 +531,15 @@ def bota(pos, lado):
 
     lo = np.array([-0.075 * s, 0.0 - 0.004, -0.095 * s])
     hi = np.array([0.075 * s, topo[1] + 0.03 * s, 0.215 * s])
-    loc, faces, nrm = _malha_do_campo(campo, lo, hi, 0.0032 * s)
+    # Passo do campo maior: metade dos triângulos (a TV Box agradece) com
+    # a mesma forma — o detalhe fino (cadarço, frisos) vem da cor.
+    loc, faces, nrm = _malha_do_campo(campo, lo, hi, 0.0046 * s)
     y = loc[:, 1]
     cor = np.tile(np.array([0.035, 0.033, 0.04], np.float32), (len(loc), 1))
     ruido = np.sin(loc[:, 0] * 900) * np.sin(loc[:, 2] * 700) * 0.01
     cor += ruido[:, None]
-    cor[y < 0.021 * s] = [0.88, 0.87, 0.84]                       # sola branca
-    cor[(y < 0.024 * s) & (y >= 0.021 * s)] = [0.20, 0.19, 0.2]    # vira
+    cor[y < 0.016 * s] = [0.10, 0.095, 0.105]                    # sola de borracha
+    cor[(y < 0.021 * s) & (y >= 0.016 * s)] = [0.92, 0.91, 0.88]  # vira branca, fina
     aro = y > topo[1] - 0.011 * s
     cor[aro] = [0.95, 0.72, 0.10]                                  # aro dourado
     cor[cadarco(loc) < 0.0015 * s] = [0.95, 0.95, 0.93]            # cadarço branco
@@ -539,7 +550,8 @@ def bota(pos, lado):
     subida = np.clip((y - (tor[1] + 0.00)) / (0.07 * s), 0, 1)
     subida = subida * subida * (3 - 2 * subida)
     dedo_z = ((pos[I(f"{lado}ToeBase")] - origem) @ base)[2]
-    dedos = np.clip((loc[:, 2] - (dedo_z - 0.015 * s)) / (0.035 * s), 0, 1) * (1 - subida)
+    # A biqueira pesa só metade no osso dos dedos: bota não dobra como pé.
+    dedos = 0.5 * np.clip((loc[:, 2] - (dedo_z - 0.015 * s)) / (0.035 * s), 0, 1) * (1 - subida)
     w[:, I(f"{lado}Leg")] = subida
     w[:, I(f"{lado}ToeBase")] = dedos
     w[:, I(f"{lado}Foot")] = 1 - subida - dedos
@@ -911,7 +923,13 @@ def anel(mascara, f, vezes=1):
 
 
 def segmentacao():
-    """O mapa de partes do Anny (boca por dentro, língua...) no espaço UV."""
+    """O mapa de partes do Anny (boca por dentro, língua...) no espaço UV.
+
+    ANNY_DADOS aponta para a pasta `anny/data` de um pacote descompactado:
+    assim dá para regerar o modelo (com o corpo em cache) sem torch."""
+    import os
+    if os.environ.get("ANNY_DADOS"):
+        return str(Path(os.environ["ANNY_DADOS"]) / "segmentation" / "body_parts_segmentation.png")
     import anny
     return str(Path(anny.__file__).parent / "data" / "segmentation" / "body_parts_segmentation.png")
 

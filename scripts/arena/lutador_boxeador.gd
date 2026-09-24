@@ -401,6 +401,21 @@ func soco_na_tela() -> bool:
 	return true
 
 
+## O SOCO FINAL: quem perdeu leva o nocaute. É o mesmo direto na câmera,
+## mas sai no fim da rodada (por cima da provocação), e depois dele o
+## lutador vai para o deboche — a comemoração de quem ganhou a luta.
+func soco_final() -> bool:
+	if not _pronto or _caindo:
+		return false
+	_fila.clear()
+	_tela_ok = true
+	_tela_bateu = false
+	_tempo_reacao = 2.4
+	_papel = ""
+	_tocar("soco_tela")
+	return true
+
+
 func tela_atingida() -> bool:
 	if _tela_bateu:
 		_tela_bateu = false
@@ -550,6 +565,8 @@ func _coreografia(dt: float) -> void:
 			_zonzo(tp)
 		"soco_tela":
 			_socar_a_tela(tp)
+		"cordas":
+			_nas_cordas(tp)
 		"knockout", "get_up":
 			a_expr["apagado"] = 1.0 if _papel == "knockout" else 0.5
 			if _papel == "get_up":
@@ -583,7 +600,8 @@ func _coreografia(dt: float) -> void:
 	var puxa := (_centro_alvo - _centro) * 2.2
 	_centro += (_centro_vel + puxa) * dt
 	_centro.x = clampf(_centro.x, -0.55, 0.55)
-	_centro.y = clampf(_centro.y, -0.95, 1.05)
+	# Nas cordas ele pode chegar até elas; fora disso, fica no miolo.
+	_centro.y = clampf(_centro.y, -CORDAS_Z if _papel == "cordas" else -0.95, 1.05)
 	# NA QUEDA, OS PÉS ESCORREGAM PARA A FRENTE. O corpo tomba para trás
 	# em volta dos pés; caindo de onde o empurrão do soco o deixou, a
 	# cabeça passava por baixo das cordas e ia parar FORA do ringue. Como
@@ -705,6 +723,45 @@ func _aplicar_golpe(tipo: String, k: int, tt: float, pico: float) -> void:
 
 
 # ------------------------------------------------------- o que ele faz
+## NAS CORDAS. 0–0,45 s: vai de costas até elas. 0,45–1,05 s: encosta,
+## tronco para trás, braços abertos por cima da corda, as cordas cedem.
+## Depois: as cordas o devolvem — um passo para a frente e a guarda volta.
+const CORDAS_Z := 1.22
+var _cordas_devolveu := false
+
+func _nas_cordas(tp: float) -> void:
+	var vai := clampf(tp / 0.45, 0.0, 1.0)
+	var apoio := clampf((tp - 0.30) / 0.25, 0.0, 1.0) * (1.0 - clampf((tp - 1.05) / 0.35, 0.0, 1.0))
+	if tp < 1.05:
+		_cordas_devolveu = false
+		_centro_alvo = Vector2(_centro.x * 0.6, lerpf(_centro.y, -CORDAS_Z, ease(vai, 0.5)))
+		_vagar_em = 2.0
+	elif not _cordas_devolveu:
+		# o estilingue das cordas
+		_cordas_devolveu = true
+		_centro_vel += Vector2(0.0, 2.1)
+		_centro_alvo = Vector2(_rng.randf_range(-0.08, 0.08), 0.02)
+	a_tronco.x -= 0.34 * apoio
+	a_cabeca.x -= 0.22 * apoio
+	a_bacia.y -= 0.03 * apoio
+	for k in 2:
+		var sl := _lado_s(k)
+		var na_corda := Vector3(0.46 * sl, -0.04, -0.20)
+		a_mao[k] = (a_mao[k] as Vector3).lerp(na_corda, apoio)
+		a_mao_dir[k] = (a_mao_dir[k] as Vector3).lerp(Vector3(sl, -0.2, -0.3).normalized(), apoio).normalized()
+		a_cotovelo[k] = (a_cotovelo[k] as Vector3).lerp(Vector3(sl, -0.5, -0.3).normalized(), apoio).normalized()
+	a_expr["dor"] = 1.0 if tp < 1.2 else 0.5
+	_rapidez = 10.0
+
+
+## Quanto o corpo está empurrando as cordas (0–1), para a arena vergá-las.
+func pressao_nas_cordas() -> float:
+	if _papel != "cordas":
+		return 0.0
+	var fundo := clampf((-_centro.y - (CORDAS_Z - 0.18)) / 0.18, 0.0, 1.0)
+	return fundo
+
+
 func _nem_sentiu(tp: float) -> void:
 	# Nem sentiu. Balança a cabeça, sorri de lado e chama com a luva.
 	a_expr["deboche"] = clampf(tp * 3.0, 0.0, 1.0)
@@ -1032,8 +1089,14 @@ func _resolver() -> void:
 		var dir_pe := frente * cos(_desce_pe) - cima * sin(_desce_pe)
 		G[s + "Foot"] = _girar(s + "Foot", dir_pe, cima)
 		O[s + "Foot"] = tornozelo
-		var dir_dedo := frente_pe * cos(_desce_dedo) - cima_pe * sin(_desce_dedo)
-		G[s + "ToeBase"] = _girar(s + "ToeBase", dir_dedo, cima_pe)
+		# BOTA É DURA: a biqueira acompanha boa parte do giro do pé. Com os
+		# dedos colados no chão e o calcanhar subindo 38°, a malha da bota
+		# dobrava na junta e fazia um bico de pato na ponta.
+		var inc_dedo := inc * 0.6
+		var frente_d := frente_pe * cos(inc_dedo) - cima_pe * sin(inc_dedo)
+		var cima_d := cima_pe * cos(inc_dedo) + frente_pe * sin(inc_dedo)
+		var dir_dedo := frente_d * cos(_desce_dedo) - cima_d * sin(_desce_dedo)
+		G[s + "ToeBase"] = _girar(s + "ToeBase", dir_dedo, cima_d)
 	# ---- grava no esqueleto
 	for k in _sk.get_bone_count():
 		var n := _nomes[k]

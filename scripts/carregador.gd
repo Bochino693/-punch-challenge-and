@@ -42,32 +42,53 @@ const AQUECER_TETO_SEGUNDOS := 45.0
 ## INTEIRO (o fundo da barra, e não só a parte cheia), movidos pelo
 ## relógio da GPU: a barra continua viva mesmo quando o número demora a
 ## subir — barra parada é o que dá a impressão de travamento.
+## A BARRA É UM MEDIDOR DE ENERGIA DE JOGO DE LUTA: pontas chanfradas,
+## moldura de metal com fio de ouro, células que acendem uma a uma, energia
+## correndo por dentro e a ponta em brasa. Tudo no shader — sempre em
+## movimento, sem custo de processador, mesmo quando o jogo está ocupado
+## montando a próxima peça.
 const SHADER_BARRA := """
 shader_type canvas_item;
 uniform float progresso = 0.0;
-uniform vec2 tamanho = vec2(640.0, 20.0);
-uniform vec4 trilho : source_color = vec4(0.11, 0.06, 0.25, 1.0);
-uniform vec4 cor_a : source_color = vec4(1.0, 0.15, 0.63, 1.0);
-uniform vec4 cor_b : source_color = vec4(1.0, 0.82, 0.08, 1.0);
+uniform vec2 tamanho = vec2(720.0, 44.0);
 void fragment() {
 	vec2 p = UV * tamanho;
-	float r = tamanho.y * 0.5;
-	vec2 c = vec2(clamp(p.x, r, tamanho.x - r), r);
-	float d = length(p - c) - r;
-	float dentro = 1.0 - smoothstep(-1.0, 0.6, d);
-	float listra = step(0.5, fract((p.x - p.y * 1.4) / 24.0 - TIME * 1.1));
-	float varre = fract(TIME * 0.42) * 1.5 - 0.25;
-	float brilho = exp(-pow((UV.x - varre) / 0.07, 2.0));
-	vec3 fundo = trilho.rgb * (0.80 + 0.35 * listra) + vec3(0.55, 0.40, 1.0) * brilho * 0.55;
-	float cheio = step(p.x, max(progresso * tamanho.x, tamanho.y));
-	vec3 fill = mix(cor_a.rgb, cor_b.rgb, UV.x) * (0.88 + 0.18 * listra) + vec3(1.0) * brilho * 0.35;
-	float borda = smoothstep(-2.5, -1.0, d) * (1.0 - smoothstep(-1.0, 0.6, d));
-	vec3 cor = mix(fundo, fill, cheio) + vec3(0.6, 0.5, 1.0) * borda * 0.35;
+	float w = tamanho.x;
+	float h = tamanho.y;
+	float s = 0.5;
+	float esq = p.x - (h - p.y) * s;
+	float dir = (w - p.y * s) - p.x;
+	float dist = min(min(esq, dir), min(p.y, h - p.y));
+	float dentro = smoothstep(0.0, 1.2, dist);
+	float moldura = 1.0 - smoothstep(4.5, 5.5, dist);
+	float fio = smoothstep(0.2, 1.0, dist) * (1.0 - smoothstep(1.8, 2.8, dist));
+	float iw = w - h * s;
+	float ix = esq;
+	float u = clamp(ix / iw, 0.0, 1.0);
+	float listra = step(0.5, fract((ix * 0.5 - p.y) / 16.0 - TIME * 1.2));
+	vec3 trilho = vec3(0.07, 0.035, 0.17) * (0.8 + 0.3 * listra);
+	float fc = fract(ix / 22.0);
+	float celula = smoothstep(0.10, 0.16, fc) * (1.0 - smoothstep(0.94, 0.99, fc));
+	float cheio = step(u, progresso);
+	vec3 fill = mix(vec3(1.0, 0.12, 0.62), vec3(1.0, 0.84, 0.10), u);
+	float brilho_topo = 1.0 - smoothstep(0.0, 0.6, (p.y - 5.0) / (h - 10.0));
+	fill *= 0.72 + 0.42 * brilho_topo;
+	float onda = 0.5 + 0.5 * sin(ix * 0.055 - TIME * 7.0);
+	onda *= onda; onda *= onda; onda *= onda;
+	fill += vec3(1.0, 0.92, 0.75) * onda * 0.28;
+	vec3 cor = mix(trilho, mix(trilho * 0.6, fill, celula), cheio);
+	float ponta = exp(-pow((u - progresso) * iw / 9.0, 2.0)) * step(0.001, progresso);
+	cor += vec3(1.0, 0.95, 0.80) * ponta * (0.8 + 0.2 * sin(TIME * 20.0));
+	float varre = fract(TIME * 0.35) * 1.6 - 0.3;
+	cor += vec3(0.6, 0.5, 1.0) * exp(-pow((u - varre) / 0.05, 2.0)) * 0.22;
+	vec3 metal = mix(vec3(0.10, 0.07, 0.20), vec3(0.38, 0.30, 0.55), 1.0 - p.y / h);
+	cor = mix(cor, metal, moldura);
+	cor = mix(cor, vec3(1.0, 0.82, 0.10), fio * 0.95);
 	COLOR = vec4(cor, dentro * COLOR.a);
 }
 """
-const BARRA_LARGURA := 640.0
-const BARRA_ALTURA := 26.0
+const BARRA_LARGURA := 720.0
+const BARRA_ALTURA := 44.0
 var _barra: ColorRect = null
 var _barra_mat: ShaderMaterial = null
 const SUMIR_SEGUNDOS := 0.45
@@ -329,10 +350,15 @@ func _desenhar() -> void:
 	var largura := BARRA_LARGURA
 	var topo := _topo_da_barra()
 	var caixa := Rect2(Vector2(540.0 - largura * 0.5, topo), Vector2(largura, BARRA_ALTURA))
+	# Brilho por baixo da barra, respirando, e o número numa plaqueta.
+	for i in range(4):
+		var cresce := float(i) * 10.0
+		t.draw_rect(caixa.grow(6.0 + cresce), Color(1.0, 0.2, 0.7, (0.05 - float(i) * 0.011) * (0.6 + 0.4 * pulso) * aparece))
 	var pct := "%d%%" % int(round(_mostrado * 100.0))
-	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 74.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 40, Color("ffd014", aparece))
+	t.draw_string_outline(_fonte_numero, Vector2(caixa.position.x, topo + 100.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 46, 8, Color(0.05, 0.02, 0.12, aparece))
+	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 100.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 46, Color("ffd014", aparece))
 	var pontos := ".".repeat(1 + int(_relogio * 2.5) % 3)
-	t.draw_string(_fonte, Vector2(caixa.position.x, topo + 124.0), _texto_status() + pontos, HORIZONTAL_ALIGNMENT_CENTER, largura, 28, Color("d9d1ff", 0.9 * aparece))
+	t.draw_string(_fonte, Vector2(caixa.position.x, topo + 150.0), _texto_status() + pontos, HORIZONTAL_ALIGNMENT_CENTER, largura, 28, Color("d9d1ff", 0.9 * aparece))
 
 
 ## Retângulo com as pontas totalmente redondas, borda lisa, com gradiente

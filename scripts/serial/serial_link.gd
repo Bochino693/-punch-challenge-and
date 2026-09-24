@@ -62,6 +62,10 @@ func send_line(_line: String) -> bool:
 func poll() -> void:
 	pass
 
+## Saída do jogo: solta o aparelho SEM ESPERAR por ele.
+func soltar_para_sair() -> void:
+	encerrar()
+
 func encerrar() -> void:
 	pass
 

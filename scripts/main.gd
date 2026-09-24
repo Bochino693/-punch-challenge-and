@@ -398,7 +398,7 @@ const ESPERA_PARA_O_PROXIMO_SOCO := 1.9
 ##
 ## O valor também encolheu, junto com os três atos abaixo. Ver lá.
 const ESPERA_DO_RANKING := 1.15
-const ESPERA_DO_RANKING_DEBOCHE := 6.8
+const ESPERA_DO_RANKING_DEBOCHE := 7.6
 const ESPERA_DO_RANKING_FESTA := 3.8
 const ESPERA_DO_RANKING_EMPATE := 2.0
 ## Os socos desta rodada, na ordem em que aconteceram.
@@ -781,6 +781,13 @@ var arena_nocaute := false
 ## "derrota" (fraco: ele tira onda e a torcida vaia).
 var desfecho := ""
 var _nocaute_na_rodada := false
+## O NOCAUTE NO JOGADOR (derrota): quanto falta para o lutador soltar o
+## soco final, se a luva já está a caminho, e há quanto tempo o "K.O."
+## está na tela (-1: não está).
+var _ko_em := -1.0
+var _ko_a_caminho := -1.0
+var _ko_t := -1.0
+const KO_DURACAO := 3.2
 ## O SOCO NA TELA: quem demora para bater leva um do lutador.
 const SOCO_NA_TELA_PRIMEIRO := Vector2(6.5, 8.5)
 const SOCO_NA_TELA_DEPOIS := Vector2(7.5, 11.0)
@@ -868,6 +875,7 @@ func _ready() -> void:
 	letreiro_do_nome.fonte = fonte
 	fx.vigia = desempenho
 	fx.montar(self)
+	_montar_escudo()
 	fx.aquecer()
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
@@ -995,9 +1003,62 @@ func _arena_no_ar() -> bool:
 		return false
 	if _tabela_no_ar():
 		return false
-	return state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED, GameDef.State.MEASURING, GameDef.State.RESULT]
+	# NA HORA DA FOTO A ARENA NÃO APARECE — e era desenhada assim mesmo,
+	# disputando a placa de vídeo com a prévia da câmera. Ela liga só no
+	# fim da contagem, a tempo de estar viva quando o soco é pedido.
+	if state == GameDef.State.COUNTDOWN:
+		return countdown_left < -0.5
+	return state in [GameDef.State.ARMED, GameDef.State.MEASURING, GameDef.State.RESULT]
+
+## O FOCO DO JOGO E O BOTÃO DE VOLTAR DO CONTROLE.
+##
+## Perder o foco é o Android pondo uma janela na frente (permissão USB,
+## permissão de câmera): o Porteiro suspende tudo que fala com USB até ela
+## fechar. Voltar (controle remoto) e fechar a janela saem pelo caminho
+## rápido de `_sair_do_jogo`.
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED:
+			Porteiro.foco(false)
+		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED:
+			Porteiro.foco(true)
+		NOTIFICATION_WM_GO_BACK_REQUEST:
+			# Na Central o VOLTAR fecha a Central (o teclado já cuida).
+			if central_aberta or calib_ativo:
+				return
+			_sair_do_jogo()
+		NOTIFICATION_WM_CLOSE_REQUEST:
+			_sair_do_jogo()
+
+var _saindo := false
+var _vida_do_fundo := -1.0
+
+## SAIR SEM TRAVAR.
+##
+## Antes a saída fechava porta e câmera ESPERANDO cada uma (dentro do
+## `_exit_tree`), e na TV Box uma delas às vezes não voltava: a tela
+## congelava no último quadro e era preciso desligar a máquina. Agora os
+## aparelhos são soltos em segundo plano, o disco é gravado (a única
+## espera que importa) e, no Android, o processo é encerrado na hora.
+func _sair_do_jogo() -> void:
+	if _saindo:
+		return
+	_saindo = true
+	set_process(false)
+	sons.silence()
+	if camera_service != null:
+		camera_service.soltar_para_sair()
+	if link != null:
+		link.soltar_para_sair()
+	SettingsStore.encerrar()
+	if OS.get_name() == "Android":
+		OS.kill(OS.get_process_id())
+		return
+	get_tree().quit()
 
 func _exit_tree() -> void:
+	if _saindo:
+		return
 	# A THREAD DA ENUMERAÇÃO FECHA PRIMEIRO, e antes de o `link` sumir:
 	# ela está falando com ele. Aqui — e só aqui — vale esperar, porque
 	# não há mais quadro para estragar.
@@ -1152,8 +1213,11 @@ func _process(delta: float) -> void:
 		arena.qualidade = desempenho.qualidade
 		arena.ligar(_arena_no_ar())
 		arena.avancar(passo)
-		if arena.tela_atingida() and state == GameDef.State.ARMED:
-			_levar_soco_na_tela()
+		if arena.tela_atingida():
+			if state == GameDef.State.ARMED:
+				_levar_soco_na_tela()
+			elif _ko_a_caminho >= 0.0:
+				_levar_ko()
 	_socorro_da_camera(passo)
 	if camera_service != null:
 		camera_service.definir_ritmo(_ritmo_da_camera())
@@ -1176,6 +1240,12 @@ func _process(delta: float) -> void:
 	# fundo, com coisa se movendo devagar e em linha reta, que essa
 	# diferença aparece mais. Agora é um relógio só, o suavizado.
 	fundo.avancar(passo)
+	var vida_do_fundo := 1.0 if state == GameDef.State.IDLE else 0.35
+	if not is_equal_approx(vida_do_fundo, _vida_do_fundo):
+		_vida_do_fundo = vida_do_fundo
+		fundo.vida(vida_do_fundo)
+	_posicionar_escudo()
+	_passo_das_moedas(passo)
 	moldura.avancar(passo)
 	letreiro_do_nome.avancar(passo)
 	tremor = maxf(0.0, tremor - passo * 26.0)
@@ -1230,11 +1300,14 @@ func _process(delta: float) -> void:
 
 ## Milissegundos entre quadros da webcam, conforme o que está na tela.
 func _ritmo_da_camera() -> int:
+	# Rápido (e em resolução cheia) só na contagem da foto e na Central.
+	# No resto do tempo a imagem nem aparece: um quadro de vez em quando
+	# só para saber que a câmera continua viva, em meia resolução.
 	if central_aberta or state == GameDef.State.COUNTDOWN:
-		return 90
+		return 100
 	if state == GameDef.State.IDLE:
-		return 700
-	return 2500
+		return 1500
+	return 3000
 
 func soltar_entrada() -> void:
 	_encerrar_ensaio()
@@ -1595,6 +1668,7 @@ func _som_ranking_neutro() -> String:
 
 func _processar_resultado(delta: float) -> void:
 	result_time += delta
+	_passo_do_ko(delta)
 	var avanco := clampf(result_time / GameDef.CONTAGEM_DURACAO, 0.0, 1.0)
 	# O número dispara e vai freando — o suspense que um placar de
 	# arcade precisa ter. O veredito só entra quando a contagem termina.
@@ -2001,7 +2075,7 @@ func motivo_da_recusa() -> String:
 		# A janela do Android está esperando: diz o que fazer nela, uma vez
 		# só — marcada "Usar por padrão", nunca mais é pedida.
 		if link != null and link.aguardando_permissao():
-			return "NA JANELA DO ANDROID: MARQUE USAR POR PADRÃO E OK"
+			return "ARDUINO: MARQUE A CAIXA NA JANELA E TOQUE OK — SÓ DESTA VEZ"
 		return "AGUARDE — CONECTANDO O ARDUINO"
 	if not camera_enabled:
 		return "CÂMERA DESLIGADA"
@@ -2083,6 +2157,9 @@ func _iniciar_rodada() -> void:
 	arena_semente = 0
 	desfecho = ""
 	_nocaute_na_rodada = false
+	_ko_em = -1.0
+	_ko_a_caminho = -1.0
+	_ko_t = -1.0
 	_cambaleio_t = -1.0
 	_rachadura_t = -1.0
 	if arena != null:
@@ -2152,11 +2229,83 @@ func _discard_round_photo() -> void:
 	photo_retained = false
 
 func _add_credit() -> void:
+	if credits >= GameDef.CREDITOS_MAX:
+		sons.play("credit")
+		return
 	credits = mini(credits + 1, GameDef.CREDITOS_MAX)
-	sons.play("credit")
-	fx.faiscas(Vector2(540, 1300), 22, Paleta.VERDE, 420.0)
+	# A FICHA ENTRA VOANDO. Uma moeda de ouro gira pelo ar e cai dentro
+	# da placa de créditos; o número sobe no impacto, com faísca e onda.
+	# Várias fichas seguidas entram em fila, uma atrás da outra.
+	var atraso := -0.001
+	if not _moedas.is_empty():
+		atraso = minf(float(_moedas[-1]) , 0.0) - 0.28
+	_moedas.append(atraso)
 	_show_notice("CRÉDITO ADICIONADO  •  SALDO %02d" % credits)
 	_salvar()
+
+## AS FICHAS NO AR. Cada uma é o seu relógio (negativo: ainda na fila).
+var _moedas: Array[float] = []
+var _placa_bateu := -1.0
+const MOEDA_VOO := 0.62
+const MOEDA_ORIGEM := Vector2(1010.0, 1180.0)
+const MOEDA_DESTINO := Vector2(372.0, 1728.0)
+
+func _passo_das_moedas(passo: float) -> void:
+	if _placa_bateu >= 0.0:
+		_placa_bateu += passo
+		if _placa_bateu > 1.2:
+			_placa_bateu = -1.0
+	if _moedas.is_empty():
+		return
+	var restantes: Array[float] = []
+	for t in _moedas:
+		var antes: float = t
+		var agora: float = t + passo
+		if antes < 0.0 and agora >= 0.0:
+			sons.play("credit")
+		if antes < MOEDA_VOO and agora >= MOEDA_VOO:
+			_placa_bateu = 0.0
+			sons.play("couro", -8.0)
+			if state == GameDef.State.IDLE:
+				fx.faiscas(MOEDA_DESTINO, 26, Paleta.AMBAR, 620.0)
+				fx.onda(MOEDA_DESTINO, 20.0, 220.0, Paleta.AMBAR, 6.0, 0.40)
+		if agora < MOEDA_VOO + 0.05:
+			restantes.append(agora)
+	_moedas = restantes
+
+## Quantas fichas ainda não chegaram na placa (o número só sobe na chegada).
+func _moedas_no_ar() -> int:
+	var n := 0
+	for t in _moedas:
+		if t < MOEDA_VOO:
+			n += 1
+	return n
+
+func _draw_moedas() -> void:
+	for t in _moedas:
+		if t < 0.0 or t >= MOEDA_VOO:
+			continue
+		var u := t / MOEDA_VOO
+		# arco: sobe um pouco e cai na placa
+		var p := MOEDA_ORIGEM.lerp(MOEDA_DESTINO, ease(u, 0.8))
+		p.y -= sin(u * PI) * 260.0
+		var r := lerpf(46.0, 30.0, u)
+		var giro := absf(cos(t * 19.0))
+		var largura := maxf(0.12, giro)
+		# rastro
+		for k in 5:
+			var uk := maxf(0.0, u - float(k + 1) * 0.045)
+			var pk := MOEDA_ORIGEM.lerp(MOEDA_DESTINO, ease(uk, 0.8))
+			pk.y -= sin(uk * PI) * 260.0
+			draw_circle(pk, r * (0.5 - float(k) * 0.08), Color(Paleta.AMBAR, 0.22 - float(k) * 0.04))
+		draw_set_transform(p, 0.0, Vector2(largura, 1.0))
+		draw_circle(Vector2.ZERO, r + 4.0, Color("6b3d00"))
+		draw_circle(Vector2.ZERO, r, Color("ffc21a"))
+		draw_circle(Vector2.ZERO, r * 0.74, Color("ffdd55"))
+		if giro > 0.35:
+			Icones.ficha(self, Vector2.ZERO, r * 0.52, Color("8a5200"))
+		draw_arc(Vector2.ZERO, r * 0.86, -2.4, -0.9, 10, Color(1, 1, 1, 0.8), 3.0, true)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 # ======================================================================
 # IMPACTO E VEREDITO
@@ -2235,6 +2384,9 @@ func _registrar_impacto(
 		arena_nocaute = bool(reacao["nocaute"])
 		if arena_nocaute:
 			_nocaute_na_rodada = true
+		if str(reacao.get("reacao", "")) == "cordas":
+			arena_frase = ["FOI PARAR NAS CORDAS!", "AS CORDAS SEGURARAM ELE!", "SENTIU! FOI PRAS CORDAS!"][socos.size() % 3]
+			sons.play("arena_publico", -5.0)
 		if bool(reacao.get("desdenhou", false)):
 			arena_frase = "ELE NEM SENTIU • TENTE MAIS FORTE"
 			# NO MEIO DA LUTA A TORCIDA ESTÁ DO LADO DE QUEM BATE. O
@@ -2261,6 +2413,59 @@ func _registrar_impacto(
 	# no Top 20 sozinho — dois socos da mesma pessoa disputando duas linhas
 	# da tabela, e a estatística contando duas partidas onde houve uma.
 	# Agora é `_fechar_rodada`, uma vez por rodada, com a nota final.
+
+## A CONTAGEM DO NOCAUTE NO JOGADOR.
+func _passo_do_ko(delta: float) -> void:
+	if _ko_em >= 0.0:
+		_ko_em -= delta
+		if _ko_em < 0.0:
+			if arena != null and arena.nocaute_no_jogador():
+				_ko_a_caminho = 2.2   # espera a luva chegar (com teto)
+			else:
+				_levar_ko()
+	if _ko_a_caminho >= 0.0:
+		_ko_a_caminho -= delta
+		if _ko_a_caminho < 0.0:
+			_levar_ko()
+	if _ko_t >= 0.0:
+		_ko_t += delta
+		if _ko_t > KO_DURACAO:
+			_ko_t = -1.0
+
+## O jogador levou o nocaute: vidro estourado, tela vermelha, "K.O." — e
+## a vaia, que só existe a partir daqui.
+func _levar_ko() -> void:
+	_ko_a_caminho = -1.0
+	if _ko_t >= 0.0:
+		return
+	_levar_soco_na_tela()
+	sons.play("nivel_nocaute", -2.0)
+	sons.play("torcida_vaia", -1.0)
+	sons.duck(12.0, 6.0)
+	tremor = maxf(tremor, 40.0)
+	clarao = maxf(clarao, 0.30)
+	_ko_t = 0.0
+	arena_frase = ArenaFrases.de_derrota(plays)
+	if arena != null:
+		arena.agitar(0.55, 7.0)
+
+## O "K.O." na tela, dentro do quadro da arena: pisca em vermelho, cresce
+## num tranco e assenta; embaixo, quem ganhou a luta.
+func _draw_ko() -> void:
+	if _ko_t < 0.0:
+		return
+	var tela := ArenaQuadro.TELA
+	var entra := clampf(_ko_t / 0.18, 0.0, 1.0)
+	var sai := 1.0 - clampf((_ko_t - (KO_DURACAO - 0.5)) / 0.5, 0.0, 1.0)
+	var a := entra * sai
+	var pisca := 0.5 + 0.5 * sin(_ko_t * 18.0) * exp(-_ko_t * 1.5)
+	draw_rect(tela, Color(0.55, 0.0, 0.06, (0.30 + 0.20 * pisca) * a))
+	var tranco := 1.0 + 0.45 * exp(-_ko_t * 9.0) * cos(_ko_t * 30.0)
+	var centro := tela.get_center() + Vector2(0.0, -40.0)
+	draw_set_transform(centro * (1.0 - tranco), 0.0, Vector2(tranco, tranco))
+	_texto_arcade("K.O.", centro.y + 60.0, 230, Color(1.0, 0.18, 0.28, a), LARGURA_UTIL)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_texto_arcade("VOCÊ FOI NOCAUTEADO", centro.y + 170.0, 58, Color(1.0, 1.0, 1.0, a), LARGURA_UTIL)
 
 ## O FIM DA RODADA NA ARENA: quem ganhou, e como a torcida reage.
 ##
@@ -2289,12 +2494,13 @@ func _fechar_desfecho() -> void:
 				arena.agitar(1.0, 7.5)
 			sons.play("torcida_festa", -3.0)
 		"derrota":
-			if arena != null:
-				arena.agitar(0.5, 8.0)
+			# QUEM PERDEU LEVA O NOCAUTE — e só DEPOIS vem a vaia. Um soco
+			# fraco sozinho não é derrota: derrota é o lutador vencer a luta,
+			# e isso tem de ser VISTO. Ele provoca, arma e acerta a câmera;
+			# o vidro racha, "K.O." — e aí a torcida vaia.
 			sons.stop("torcida_incentivo")
-			sons.play("torcida_vaia", -1.0)
-			sons.duck(12.0, 6.0)
-			arena_frase = ArenaFrases.de_derrota(plays)
+			_ko_em = 1.25
+			arena_frase = "ELE NÃO CAIU… E AGORA VEM PRA CIMA!"
 		_:
 			if arena != null:
 				arena.agitar(0.45, 4.0)
@@ -2393,7 +2599,7 @@ const ENSAIO_SALVA := [
 	"state", "result_score", "displayed_score", "verdict_time", "result_time",
 	"posicao_no_ranking", "ranking_announced", "ranking_started_at", "pancada_tempo",
 	"pancada_nivel", "pancada_forca", "socos", "clarao", "tremor", "_rachadura",
-	"_rachadura_t", "_cambaleio_t", "countdown_left", "pose_finished", "desfecho",
+	"_rachadura_t", "_cambaleio_t", "countdown_left", "pose_finished", "desfecho", "_ko_t",
 	"arena_frase", "zoom_impacto", "ranking", "ultimo_soco_em",
 ]
 var _ensaio := -1
@@ -2494,6 +2700,9 @@ func _draw_ensaio() -> void:
 		_cambaleio_t = 0.3
 		_draw_partida()
 		_draw_soco_na_tela()
+		if i == 19:
+			_ko_t = 0.6
+			_draw_ko()
 	elif i < 23:
 		state = GameDef.State.COUNTDOWN
 		countdown_left = 2.4
@@ -3355,7 +3564,8 @@ func _poll_serial(_delta: float) -> void:
 	if central_aberta and not placa_respondeu:
 		_pedir_a_lista()
 	if not link.is_open():
-		if animation_time >= proxima_tentativa and _hora_de_procurar():
+		# Com uma janela do Android na frente do jogo, nada de USB.
+		if animation_time >= proxima_tentativa and _hora_de_procurar() and Porteiro.livre():
 			_tentar_conectar()
 		return
 	if not _porta_confirmada and animation_time - _porta_pedida_em > ESPERA_DA_CONFIRMACAO:
@@ -3493,6 +3703,11 @@ func _on_serial_closed(_porta: String) -> void:
 	placa_calibrando = false
 	progresso_calibracao = 0
 	proxima_tentativa = animation_time + (1.0 if estava_falando else 0.18)
+	# ESPERANDO A AUTORIZAÇÃO, NÃO SE INSISTE. Reabrir a porta 5 vezes por
+	# segundo enquanto a janela do Android está na tela era USB sendo
+	# enumerada sem parar — processador ocupado à toa.
+	if link != null and link.aguardando_permissao():
+		proxima_tentativa = animation_time + 2.5
 	if estava_falando:
 		sons.play("disconnect_alert", -4.0)
 	# Sem sensor não há rodada honesta. Antes do primeiro golpe, devolve a
@@ -3528,6 +3743,7 @@ func _on_serial_line(line: String) -> void:
 	# Isso é a prova, e é o bastante.
 	if not placa_respondeu:
 		placa_respondeu = true
+		Porteiro.arduino_resolvido()
 		serial_status = "CONECTADO %s" % porta_atual
 		# O MOMENTO EM QUE A PLACA FALA MERECE SER VISTO E OUVIDO.
 		#
@@ -4861,6 +5077,7 @@ func _draw() -> void:
 	_draw_pancada()
 	_draw_clarao()
 	_draw_soco_na_tela()
+	_draw_ko()
 	_draw_alertas_graves()
 	_draw_transicao()
 	_draw_ok_segurado()
@@ -5382,6 +5599,7 @@ func _draw_show_idle() -> void:
 			Color(Paleta.AMBAR, bate), chegada, 3.0
 		)
 	_draw_placa_de_creditos(cor_credito, chegada)
+	_draw_moedas()
 
 ## A PLACA DE CRÉDITOS. Era uma linha amarela miúda solta sobre a faixa
 ## vermelha do rodapé — cor quente em cima de cor quente, e pequena: de
@@ -5389,7 +5607,13 @@ func _draw_show_idle() -> void:
 ## o rótulo em branco e o número grande na letra do placar.
 func _draw_placa_de_creditos(cor: Color, alpha: float) -> void:
 	var caixa := Rect2(330.0, 1690.0, 420.0, 76.0)
-	_cartao(caixa, Color("0c0615", 0.92), Color(cor, 0.9), alpha, 3.0)
+	# O BATE DA FICHA: a placa pula, acende em ouro e o número estufa.
+	var bate := 0.0
+	if _placa_bateu >= 0.0:
+		bate = exp(-_placa_bateu * 5.0)
+		caixa = caixa.grow(10.0 * bate * absf(cos(_placa_bateu * 22.0)))
+		cor = cor.lerp(Paleta.AMBAR, bate)
+	_cartao(caixa, Color("0c0615", 0.92).lerp(Color("5a3a00"), 0.55 * bate), Color(cor, 0.9), alpha, 3.0 + 3.0 * bate)
 	var meio_y := caixa.position.y + caixa.size.y * 0.5
 	if game_mode == "free":
 		_letreiro_centrado("JOGO LIVRE", meio_y + 15.0, 40, Color(cor, alpha))
@@ -5399,7 +5623,11 @@ func _draw_placa_de_creditos(cor: Color, alpha: float) -> void:
 		fonte_texto, Vector2(caixa.position.x + 84.0, meio_y + 13.0), "CRÉDITOS",
 		HORIZONTAL_ALIGNMENT_LEFT, 200.0, _corpo(36), Color(Color.WHITE, alpha)
 	)
-	var numero := "%02d" % credits
+	var numero := "%02d" % maxi(0, credits - _moedas_no_ar())
+	if bate > 0.01:
+		# "+1" subindo da placa
+		var sobe := 1.0 - bate
+		_letreiro("+1", Vector2(caixa.end.x + 22.0, caixa.position.y + 52.0 - 60.0 * sobe), 48, Color(Paleta.AMBAR, bate * alpha), Color(Paleta.AMBAR, 0.3 * bate * alpha))
 	draw_string_outline(
 		fonte, Vector2(caixa.position.x, meio_y + 20.0), numero,
 		HORIZONTAL_ALIGNMENT_RIGHT, caixa.size.x - 26.0, 52, 8, Color(Paleta.CONTORNO, alpha)
@@ -5411,7 +5639,12 @@ func _draw_placa_de_creditos(cor: Color, alpha: float) -> void:
 
 func _capitulo_da_marca(alpha: float) -> void:
 	var flutuar := smoothstep(0.5, 1.3, state_time)
-	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8 * flutuar), 440.0, alpha)
+	var centro := Vector2(540, 560 + sin(animation_time * 1.4) * 8 * flutuar)
+	_raios_do_escudo(centro, alpha)
+	# O ESCUDO É UM NÓ COM SHADER (brilho varrendo, pulso): aqui só se diz
+	# onde ele fica neste quadro. Ver `_posicionar_escudo`.
+	_escudo_pedido = {"centro": centro, "largura": 924.0, "alpha": alpha, "quadro": Engine.get_process_frames()}
+	_faiscas_do_escudo(centro, alpha)
 	ArcadeStage.titulo(self, alpha, animation_time)
 	# O NOME É DESENHADO PELO NÓ DO SHADER, e não aqui. Ele continua no
 	# mesmo lugar, no mesmo corpo e com a mesma entrada esmaecida — o que
@@ -5428,6 +5661,74 @@ func _capitulo_da_marca(alpha: float) -> void:
 ## só — pôr o shader ali aplicaria o brilho ao fundo, aos cartões e ao
 ## placar. Então o nome mora num nó próprio, e esta função é a ponte:
 ## a tela continua mandando quando, onde e com que opacidade.
+## Raios girando atrás do escudo, magenta e ciano, achatados como a estrela.
+func _raios_do_escudo(centro: Vector2, alpha: float) -> void:
+	var giro := animation_time * 0.22
+	var n := 16
+	for i in n:
+		var a0 := giro + float(i) * TAU / float(n)
+		var a1 := a0 + TAU / float(n) * 0.5
+		var r := 700.0
+		var cor := Paleta.ROSA if i % 2 == 0 else Paleta.CIANO
+		var pulso := 0.08 + 0.05 * sin(animation_time * 1.7 + float(i) * 0.8)
+		draw_colored_polygon(PackedVector2Array([
+			centro,
+			centro + Vector2(cos(a0), sin(a0) * 0.72) * r,
+			centro + Vector2(cos(a1), sin(a1) * 0.72) * r,
+		]), Color(cor, pulso * alpha))
+
+## Brilhos nas pontas da estrela: acendem e apagam, cada um no seu tempo.
+func _faiscas_do_escudo(centro: Vector2, alpha: float) -> void:
+	for i in 7:
+		var fase := fmod(animation_time * 0.9 + float(i) * 0.37, 1.0)
+		var v := sin(fase * PI)
+		if v < 0.05:
+			continue
+		var ang: float = float(i) * 2.39 + floor(animation_time * 0.9 + float(i) * 0.37) * 1.7
+		var p := centro + Vector2(cos(ang) * 430.0, sin(ang) * 250.0)
+		var t := 26.0 * v
+		var cor := Color(1.0, 0.97, 0.88, v * alpha)
+		draw_line(p - Vector2(t, 0), p + Vector2(t, 0), cor, 3.0, true)
+		draw_line(p - Vector2(0, t), p + Vector2(0, t), cor, 3.0, true)
+		draw_circle(p, 4.0 * v, cor)
+
+## O nó do escudo (TextureRect com `escudo_vivo.gdshader`). Aparece só no
+## quadro em que a abertura pediu, respira e balança de leve.
+var _escudo: TextureRect = null
+var _escudo_pedido := {}
+
+func _montar_escudo() -> void:
+	_escudo = TextureRect.new()
+	_escudo.name = "EscudoVivo"
+	_escudo.texture = ArcadeStage.LOGO
+	_escudo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_escudo.stretch_mode = TextureRect.STRETCH_SCALE
+	_escudo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/escudo_vivo.gdshader")
+	_escudo.material = mat
+	_escudo.visible = false
+	add_child(_escudo)
+
+func _posicionar_escudo() -> void:
+	if _escudo == null:
+		return
+	var pedido_agora := not _escudo_pedido.is_empty() \
+		and Engine.get_process_frames() - int(_escudo_pedido["quadro"]) <= 2 \
+		and transicao < 0.0 and not central_aberta and not intro_active
+	_escudo.visible = pedido_agora
+	if not pedido_agora:
+		return
+	var largura: float = _escudo_pedido["largura"]
+	var altura := largura * float(ArcadeStage.LOGO.get_height()) / float(ArcadeStage.LOGO.get_width())
+	var respira := 1.0 + 0.028 * sin(animation_time * 2.2)
+	_escudo.size = Vector2(largura, altura)
+	_escudo.pivot_offset = _escudo.size * 0.5
+	_escudo.position = (_escudo_pedido["centro"] as Vector2) - _escudo.size * 0.5
+	_escudo.scale = Vector2(respira, respira)
+	_escudo.rotation = sin(animation_time * 0.8) * 0.022
+	_escudo.modulate = Color(1, 1, 1, float(_escudo_pedido["alpha"]))
+
 func _nome_do_jogo(alpha: float) -> void:
 	# O NÓ FICA ACIMA DO DESENHO PRINCIPAL — é o que faz o reflexo passar
 	# por cima do letreiro em vez de ficar embaixo do fundo. O preço é

@@ -24,14 +24,19 @@ var _estado := FECHADA
 var _porta := ""
 var _porta_pedida := ""
 var _portas := PackedStringArray()
+var _versao := 1
 
 func _init() -> void:
 	if Engine.has_singleton("PunchUsbSerial"):
 		_plugin = Engine.get_singleton("PunchUsbSerial")
 		_motivo = ""
-		# O plugin deste APK não tem `pollSerial`, e `has_method` num plugin
-		# Android não serve para descobrir isso (responde "não" sempre).
-		_assincrono = false
+		# `has_method` num plugin Android responde "não" sempre; quem diz o
+		# que o plugin sabe fazer é a versão dele. A 2 abre a porta e lista
+		# a USB numa thread própria e entrega tudo em `pollSerial`; um
+		# plugin antigo (sem a versão) fica no caminho de antes.
+		var versao = _plugin.call("getApiVersion")
+		_versao = int(versao) if versao != null else 1
+		_assincrono = _versao >= 2
 
 func nome_do_caminho() -> String:
 	return CAMINHO_ANDROID_USB
@@ -105,7 +110,11 @@ func poll() -> void:
 	var linhas := lote.split("\n", false)
 	if linhas.is_empty():
 		return
-	_mudar_estado(int(linhas[0]))
+	var cabeca := linhas[0].split("|", true, 1)
+	var erro := cabeca[1] if cabeca.size() > 1 else ""
+	if not erro.is_empty():
+		_motivo = erro
+	_mudar_estado(int(cabeca[0]))
 	for i in range(1, linhas.size()):
 		var limpa := linhas[i].strip_edges()
 		if not limpa.is_empty():
@@ -126,6 +135,7 @@ func _mudar_estado(novo: int) -> void:
 	var antes := _estado
 	_estado = novo
 	if novo == ABERTA:
+		_motivo = ""
 		_porta = _porta_pedida
 		opened.emit(_porta)
 	elif novo == FECHADA and antes != FECHADA:
@@ -135,3 +145,15 @@ func _mudar_estado(novo: int) -> void:
 
 func encerrar() -> void:
 	close_port()
+
+## A janela de permissão USB do Android está na frente do jogo?
+func janela_aberta() -> bool:
+	return _versao >= 2 and _plugin != null and bool(_plugin.call("usbPermissionPending"))
+
+func soltar_para_sair() -> void:
+	if _plugin == null:
+		return
+	if _versao >= 2:
+		_plugin.call("shutdown")
+	else:
+		_plugin.call("closePort")
