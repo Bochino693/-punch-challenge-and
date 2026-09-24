@@ -168,11 +168,15 @@ static func background_animado(canvas: CanvasItem, time: float) -> void:
 static func emblem(canvas: CanvasItem, center: Vector2, size: float, alpha := 1.0) -> void:
 	var largura := size * 2.1
 	var altura := largura * float(LOGO.get_height()) / float(LOGO.get_width())
-	canvas.draw_texture_rect(LOGO, Rect2(center - Vector2(largura, altura) * 0.5, Vector2(largura, altura)), false, Color(1, 1, 1, alpha))
+	Logos.desenhar(canvas, "superboxing", center, altura, alpha)
 
 ## Uma imagem da marca centrada, na largura pedida.
 static func imagem(canvas: CanvasItem, textura: Texture2D, centro: Vector2, largura: float, cor := Color.WHITE) -> void:
 	var altura := largura * float(textura.get_height()) / float(textura.get_width())
+	# A logo do jogo sai da versão do tamanho certo (sem pixel quebrado).
+	if textura == LOGO:
+		Logos.desenhar(canvas, "superboxing", centro, altura, cor.a)
+		return
 	canvas.draw_texture_rect(textura, Rect2(centro - Vector2(largura, altura) * 0.5, Vector2(largura, altura)), false, cor)
 
 ## "FIGHT!" e "NEVER GIVE UP!" no lugar do nome, como no gabinete.

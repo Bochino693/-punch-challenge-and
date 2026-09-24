@@ -124,39 +124,69 @@ func ao_voltar() -> void:
 	_uvc_proximo_religar_ms = mini(_uvc_proximo_religar_ms, Time.get_ticks_msec() + 1500)
 	_proxima_busca_ms = 0
 
+## O DESPERTAR EM ETAPAS, UMA POR VEZ, COM FOLGA ENTRE ELAS.
+##
+## Nada de câmera no quadro em que o carregamento termina: a abertura
+## aparece primeiro, e só 1,5 s depois a câmera começa — uma etapa a cada
+## 0,3 s, cada uma anotada no `Diario`. Se uma delas travar a TV Box, a
+## próxima abertura do jogo mostra qual foi.
+const DESPERTAR_ATRASO_MS := 1500
+const DESPERTAR_PASSO_MS := 300
+var _etapa_despertar := -1
+var _proxima_etapa_ms := 0
+
 func acordar() -> void:
 	if not adormecida:
 		return
 	adormecida = false
-	_montar()
+	_etapa_despertar = 0
+	_proxima_etapa_ms = Time.get_ticks_msec() + DESPERTAR_ATRASO_MS
 
 func _ready() -> void:
 	set_process(true)
 	if adormecida:
 		return
-	_montar()
+	_etapa_despertar = 0
+	_proxima_etapa_ms = 0
 
 func _montar() -> void:
-	if _ja_montada:
-		return
-	_ja_montada = true
-	_preparar_android_usb()
-	# No Android a permissão sai em `_passo_das_permissoes` (primeiro
-	# quadro). Este nó só é criado DEPOIS do carregamento — uma janela do
-	# Android no meio do carregamento pausava o jogo e a barra congelava.
-	if OS.get_name() != "Android":
-		_pedir_permissao_android()
-	_acordar_servidor()
-	if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
-		CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
-	if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
-		CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
-	if enabled:
-		iniciar_captura()
-	else:
-		estado = Estado.DESLIGADA
-		status = "CÂMERA DESATIVADA"
-	set_process(true)
+	_etapa_despertar = 0
+	_proxima_etapa_ms = 0
+
+## Uma etapa do despertar. Devolve true enquanto ainda há etapas.
+func _despertar_passo(agora: int) -> bool:
+	if _etapa_despertar < 0:
+		return false
+	if agora < _proxima_etapa_ms:
+		return true
+	_proxima_etapa_ms = agora + DESPERTAR_PASSO_MS
+	match _etapa_despertar:
+		0:
+			Diario.marca("CAMERA: ponte Android")
+			_preparar_android_usb()
+		1:
+			Diario.marca("CAMERA: servidor de camera")
+			_acordar_servidor()
+			if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
+				CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
+			if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
+				CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
+		2:
+			if OS.get_name() != "Android":
+				_pedir_permissao_android()
+			if not enabled:
+				estado = Estado.DESLIGADA
+				status = "CÂMERA DESATIVADA"
+			elif OS.get_name() != "Android":
+				iniciar_captura()
+			# No Android a abertura sai em `_passo_das_permissoes`, que só
+			# abre a câmera depois de confirmar a permissão.
+			_ja_montada = true
+			_etapa_despertar = -1
+			Diario.marca("CAMERA: pronta para pedir permissao")
+			return false
+	_etapa_despertar += 1
+	return true
 
 ## O QUE A PONTE ANDROID SABE FAZER.
 ##
@@ -188,7 +218,7 @@ var _permissoes_conferidas_ms := 0
 var _pedido_em_ms := 0
 
 func permissao_resolvida() -> bool:
-	if OS.get_name() != "Android" or _permissoes_ok:
+	if OS.get_name() != "Android" or _permissoes_ok or not enabled:
 		return true
 	# Pedida e sem resposta há muito tempo: não segura o resto da máquina.
 	return _permissoes_pedidas and Time.get_ticks_msec() - _pedido_em_ms > 15000
@@ -202,13 +232,17 @@ func _passo_das_permissoes(agora: int) -> bool:
 	if OS.get_granted_permissions().has("android.permission.CAMERA"):
 		_permissoes_ok = true
 		status = "CÂMERA AUTORIZADA — ABRINDO…"
+		Diario.marca("CAMERA: permissao ok, abrindo")
 		if enabled:
 			iniciar_captura()
+		Diario.marca("CAMERA: abertura pedida")
 		return true
 	if not _permissoes_pedidas:
 		_permissoes_pedidas = true
 		_pedido_em_ms = agora
+		Diario.marca("CAMERA: pedindo permissao")
 		OS.request_permission("CAMERA")
+		Diario.marca("CAMERA: janela de permissao pedida")
 	status = "AUTORIZE A CÂMERA NA JANELA DO ANDROID"
 	return false
 
@@ -264,9 +298,13 @@ func _requisitar_webcam_usb_android(forcar := false) -> void:
 			status = resposta
 
 func _process(_delta: float) -> void:
-	if adormecida or not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
+	if adormecida:
 		return
 	var agora := Time.get_ticks_msec()
+	if _despertar_passo(agora):
+		return
+	if not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
+		return
 	# Câmera ainda sem autorização: nada a abrir. (Autorizada, a câmera
 	# anda sempre — só os PEDIDOS de janela esperam o Porteiro.)
 	if not _passo_das_permissoes(agora):
