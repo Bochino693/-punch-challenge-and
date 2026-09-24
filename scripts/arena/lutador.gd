@@ -23,6 +23,7 @@ const PAPEIS_CONTINUOS := ["idle", "guard"]
 const PAPEIS := [
 	"idle", "guard", "taunt_weak", "hit_light", "hit_medium", "hit_heavy",
 	"stagger", "knockout", "get_up", "celebra", "deboche", "tonto", "soco_tela",
+	"cordas",
 ]
 ## As festas de fim de rodada: duram até a rodada acabar (não voltam
 ## sozinhas para a guarda).
@@ -30,6 +31,8 @@ const PAPEIS_DE_FESTA := ["celebra", "deboche", "tonto"]
 const DURACAO := {
 	"taunt_weak": 1.20, "stagger": 1.30, "hit_heavy": 0.95,
 	"hit_medium": 0.70, "hit_light": 0.46,
+	# Jogado nas cordas, apoia, e as cordas o devolvem ao centro.
+	"cordas": 2.0,
 }
 ## Recuo de cada reação: para trás (m), tombo (rad) e lateral (m).
 const RECUO := {
@@ -38,6 +41,7 @@ const RECUO := {
 	"hit_medium": {"tras": 0.22, "tombo": 0.10, "lado": 0.08},
 	"hit_heavy": {"tras": 0.36, "tombo": 0.16, "lado": 0.12},
 	"stagger": {"tras": 0.52, "tombo": 0.24, "lado": 0.22},
+	"cordas": {"tras": 0.40, "tombo": 0.16, "lado": 0.10},
 }
 
 var _corpo: Node3D = null
@@ -152,6 +156,11 @@ static func reacao_para_pontos(pontos: int, forca: float) -> String:
 	if pontos >= 0 and pontos < LIMITE_DO_DESDEM:
 		return "taunt_weak"
 	var reacao := reacao_para_forca(forca)
+	# O SOCO BOM QUE NÃO DERRUBA manda o adversário para as cordas: ele
+	# vai de costas, se apoia nelas e volta — é a cena que diz "esse
+	# pegou" sem ser nocaute.
+	if reacao == "hit_medium" or reacao == "hit_heavy":
+		return "cordas"
 	return "hit_light" if reacao == "taunt_weak" else reacao
 
 
@@ -239,6 +248,11 @@ func soco_na_tela() -> bool:
 	return false
 
 
+## O soco final de quem venceu a luta (o jogador perdeu).
+func soco_final() -> bool:
+	return false
+
+
 ## Verdadeiro UMA vez, no quadro em que a luva encosta na câmera.
 func tela_atingida() -> bool:
 	return false
@@ -247,6 +261,11 @@ func tela_atingida() -> bool:
 ## Quanto a câmera avança (m) e desce para acompanhar o lutador.
 func camera_extra() -> Vector2:
 	return Vector2.ZERO
+
+
+## Quanto o corpo empurra as cordas de trás (0–1). Só o boxeador sabe.
+func pressao_nas_cordas() -> float:
+	return 0.0
 
 
 ## Onde está a câmera, em coordenadas do mundo da arena.

@@ -294,11 +294,36 @@ func _montar_ringue() -> void:
 		_material_solido(Color("ff2ab0"), 0.35, 0.22),
 		_material_solido(Color("46dcff"), 0.35, 0.12),
 	]
+	_cordas_fundo.clear()
 	for i in range(ALTURAS_DAS_CORDAS.size()):
 		var y: float = ALTURAS_DAS_CORDAS[i]
-		_peca(corda, tintas[i], Vector3(0.0, y, -m), Vector3(0.0, 0.0, PI * 0.5))
+		_cordas_fundo.append(_peca(corda, tintas[i], Vector3(0.0, y, -m), Vector3(0.0, 0.0, PI * 0.5)))
 		for lado in [-1.0, 1.0]:
 			_peca(corda, tintas[i], Vector3(lado * m, y, 0.0), Vector3(PI * 0.5, 0.0, 0.0))
+
+
+## AS CORDAS DE TRÁS CEDEM quando o lutador cai nelas, e voltam com um
+## balanço de mola (passam um pouco do lugar e assentam).
+var _cordas_fundo: Array = []
+var _cordas_pos := 0.0
+var _cordas_vel := 0.0
+
+func _mexer_cordas(delta: float) -> void:
+	var alvo := lutador.pressao_nas_cordas() if lutador != null else 0.0
+	if alvo <= 0.0 and absf(_cordas_pos) < 0.001 and absf(_cordas_vel) < 0.001:
+		return
+	var d := minf(delta, 0.05)
+	_cordas_vel += (alvo - _cordas_pos) * 140.0 * d
+	_cordas_vel *= exp(-7.0 * d)
+	_cordas_pos += _cordas_vel * d
+	for i in range(_cordas_fundo.size()):
+		var c := _cordas_fundo[i] as Node3D
+		if c != null:
+			# a corda do meio (na altura das costas) cede mais
+			var peso: float = [0.55, 1.0, 0.75][mini(i, 2)]
+			c.position.z = -MEIO_RINGUE - 0.16 * _cordas_pos * peso
+	if alvo > 0.6:
+		_publico = maxf(_publico, 0.4)
 
 
 func _montar_fachos() -> void:
@@ -649,6 +674,11 @@ func soco_na_tela() -> bool:
 	return lutador != null and _ativa and lutador.soco_na_tela()
 
 
+## O lutador que venceu nocauteia o jogador (soco final na câmera).
+func nocaute_no_jogador() -> bool:
+	return lutador != null and _ativa and lutador.soco_final()
+
+
 ## Verdadeiro uma vez, no quadro em que a luva "acerta" a tela.
 func tela_atingida() -> bool:
 	return lutador != null and lutador.tela_atingida()
@@ -703,6 +733,7 @@ func avancar(delta: float) -> void:
 	if lutador != null:
 		lutador.ponto_da_camera = camera.global_position
 		lutador.atualizar(delta)
+	_mexer_cordas(delta)
 	_sombra_de_contato()
 	_camera(delta)
 	_luzes()

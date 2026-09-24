@@ -66,19 +66,32 @@ func _ready() -> void:
 	# As duas camadas de efeito ficam ACIMA do cenário (z relativo).
 	fx.montar(self, 1, 1)
 
+## O FUNDO SE MEXE NA PLACA DE VÍDEO (`fundo_vivo.gdshader`): a arte do
+## gabinete respira, a luz corre pelos riscos e um relâmpago acende de vez
+## em quando. Nenhum pixel é redesenhado pelo processador.
+var _vivo: ShaderMaterial = null
+
 func _montar_camada_parada() -> void:
-	_parado = Control.new()
-	_parado.name = "Parado"
+	var arte := TextureRect.new()
+	arte.name = "Parado"
 	# Atrás de tudo o que este nó desenha, e sem receber clique: é
 	# cenário, não interface.
-	_parado.z_index = -1
-	_parado.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_parado.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_parado.draw.connect(_desenhar_parado)
+	arte.z_index = -1
+	arte.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	arte.set_anchors_preset(Control.PRESET_FULL_RECT)
+	arte.texture = ArcadeStage.FUNDO
+	arte.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	arte.stretch_mode = TextureRect.STRETCH_SCALE
+	_vivo = ShaderMaterial.new()
+	_vivo.shader = load("res://shaders/fundo_vivo.gdshader")
+	arte.material = _vivo
+	_parado = arte
 	add_child(_parado)
 
-func _desenhar_parado() -> void:
-	ArcadeStage.background_estatico(_parado)
+## Quanto o fundo se mexe: 1 na abertura, menos durante a luta.
+func vida(valor: float) -> void:
+	if _vivo != null:
+		_vivo.set_shader_parameter("forca", valor)
 
 ## O PASSO VEM DE FORA. Ver o cabeçalho.
 func avancar(passo: float) -> void:
@@ -88,7 +101,6 @@ func avancar(passo: float) -> void:
 	# que, num gabinete, acontece zero vez por noite.
 	if _parado != null and size != _tamanho_desenhado:
 		_tamanho_desenhado = size
-		_parado.queue_redraw()
 		# A poeira do palco é um emissor contínuo do motor, e não um
 		# sorteio por quadro em script.
 		fx.brisa(
