@@ -116,6 +116,8 @@ var _obturador_foi_aberto := false
 ## Android até o jogo estar pronto (`acordar`). Uma janela aberta no meio
 ## do carregamento pausava o jogo e a barra congelava.
 var adormecida := false
+## O jogo está parado na tela de espera: pode aparecer janela do Android.
+var janelas_liberadas := false
 var _ja_montada := false
 
 ## O jogo voltou para a frente: confere já a permissão e a câmera.
@@ -130,7 +132,9 @@ func ao_voltar() -> void:
 ## aparece primeiro, e só 1,5 s depois a câmera começa — uma etapa a cada
 ## 0,3 s, cada uma anotada no `Diario`. Se uma delas travar a TV Box, a
 ## próxima abertura do jogo mostra qual foi.
-const DESPERTAR_ATRASO_MS := 1500
+## Depois da animação de abertura inteira (~5,5 s) e do Arduino (6 s):
+## a luva da entrada anda sem nada de câmera por baixo.
+const DESPERTAR_ATRASO_MS := 7000
 const DESPERTAR_PASSO_MS := 300
 var _etapa_despertar := -1
 var _proxima_etapa_ms := 0
@@ -246,7 +250,10 @@ func _passo_das_permissoes(agora: int) -> bool:
 ## Liga o CameraServer e escuta as câmeras que entram/saem. No Android só
 ## DEPOIS da permissão: ligar antes travava a TV Box na abertura.
 func _ligar_servidor() -> void:
-	if not _tem_permissao_da_camera():
+	# No Android o CameraServer do Godot NUNCA é ligado: quem abre a câmera
+	# é só o plugin (API clássica + UVC direta). Dois donos para a mesma
+	# webcam travavam a TV Box.
+	if OS.get_name() == "Android" or not _tem_permissao_da_camera():
 		return
 	_acordar_servidor()
 	if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
@@ -265,9 +272,13 @@ func _pedir_permissao_android() -> void:
 func _preparar_android_usb() -> void:
 	if OS.get_name() != "Android" or not Engine.has_singleton("PunchUsbSerial"):
 		return
+	# SÓ PEGA A PONTE. O `prepareAndroidKiosk` (girar/tela cheia/trocar o
+	# layout da janela) NÃO é mais chamado: mexer na janela com o jogo já
+	# desenhando derrubava a superfície de vídeo e a imagem congelava —
+	# era o travamento em 86%, depois em 100%, depois na luva da abertura:
+	# sempre no instante em que a câmera acordava. Paisagem e tela cheia
+	# já vêm do próprio APK (export_presets).
 	_android_bridge = Engine.get_singleton("PunchUsbSerial")
-	if _android_bridge != null and _ponte_tem("prepareAndroidKiosk"):
-		_android_bridge.call("prepareAndroidKiosk")
 
 ## QUEM ABRE A CÂMERA NO ANDROID — um só, nunca os dois.
 ##
@@ -280,6 +291,8 @@ func _ponte_tem_camera() -> bool:
 		and int(_android_bridge.call("getSystemCameraCount")) > 0
 
 func _servidor_tem_camera() -> bool:
+	if OS.get_name() == "Android":
+		return false
 	return not CameraServer.feeds().is_empty()
 
 func _requisitar_webcam_usb_android(forcar := false) -> void:
@@ -293,6 +306,11 @@ func _requisitar_webcam_usb_android(forcar := false) -> void:
 	# permissão USB nenhuma: só abrir. Pedir a USB aqui abria janelas à toa.
 	if _ponte_tem_camera():
 		_android_bridge.call("startUvcCamera")
+		return
+	# A janela USB da webcam é pedida no carregamento. Aqui (webcam
+	# espetada depois) só com o jogo parado na tela de espera — nunca na
+	# abertura, na foto ou no soco.
+	if not janelas_liberadas:
 		return
 	var agora := Time.get_ticks_msec()
 	if not forcar and agora < _proxima_permissao_usb_ms:
@@ -321,6 +339,8 @@ func _process(_delta: float) -> void:
 	# quadro mais recente; ler aqui não cria fila nem segura o impacto.
 	if _amostrar_uvc_android(agora):
 		return
+	if OS.get_name() == "Android":
+		return  # no Android a câmera é só do plugin
 	# Mesmo com uma câmera aberta, continua observando a lista. Assim uma
 	# webcam USB conectada depois substitui automaticamente a integrada.
 	var hora_de_buscar := agora >= _proxima_busca_ms
@@ -366,6 +386,8 @@ func _vigiar_webcam_android(agora: int) -> void:
 	if not _uvc_teve_video:
 		_uvc_proximo_religar_ms = agora + 3000
 		_android_bridge.call("startUvcCamera")
+		if _ponte_tem("getUvcStatus"):
+			Diario.marca("CAMERA: " + str(_android_bridge.call("getUvcStatus")))
 		_requisitar_webcam_usb_android(true)
 		return
 	if _uvc_parada:
@@ -386,7 +408,9 @@ func _iniciar_uvc_android() -> void:
 		return
 	if not _permissoes_ok:
 		return
-	_uvc_proximo_religar_ms = Time.get_ticks_msec() + 8000
+	# A primeira chamada do plugin só começa a contar as câmeras: a próxima
+	# tentativa vem logo, e não 8 s depois.
+	_uvc_proximo_religar_ms = Time.get_ticks_msec() + 2000
 	_uvc_parada = false
 	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
 		return
@@ -442,6 +466,8 @@ func definir_ritmo(ms: int) -> void:
 		_android_bridge.call("setUvcHalfResolution", ms > 150)
 
 func _descobrir_cameras(recriar_extensao: bool) -> void:
+	if OS.get_name() == "Android":
+		return  # o plugin procura e abre (ver `_vigiar_webcam_android`)
 	_acordar_servidor()
 	# Com a ponte Android dona da câmera, o CameraServer não abre nada:
 	# dois donos para a mesma webcam derrubam os dois.
@@ -645,7 +671,7 @@ func _tentar_liberar_privacidade() -> void:
 	_proxima_busca_ms = 0
 
 func _adotar_camera_usb_preferida() -> void:
-	if not enabled:
+	if not enabled or OS.get_name() == "Android":
 		return
 	if OS.get_name() == "Android" and _ponte_tem_camera():
 		return
@@ -673,7 +699,7 @@ func _adotar_camera_usb_preferida() -> void:
 const ESPERA_ANTES_DE_LIBERAR_MS := 3000
 
 func _abrir_feed_disponivel() -> void:
-	if not enabled or _feed != null:
+	if not enabled or _feed != null or OS.get_name() == "Android":
 		return
 	var feeds: Array = CameraServer.feeds()
 	if feeds.is_empty():
@@ -761,7 +787,7 @@ func _on_camera_feeds_updated(_id: int = 0) -> void:
 		call_deferred("_adotar_camera_usb_preferida")
 
 func _acordar_servidor() -> void:
-	if not _tem_permissao_da_camera():
+	if OS.get_name() == "Android" or not _tem_permissao_da_camera():
 		return
 	if CameraServer.has_method("set_monitoring_feeds"):
 		CameraServer.call("set_monitoring_feeds", true)

@@ -1241,6 +1241,8 @@ func _process(delta: float) -> void:
 	_socorro_da_camera(passo)
 	if camera_service != null:
 		camera_service.definir_ritmo(_ritmo_da_camera())
+		camera_service.janelas_liberadas = state == GameDef.State.IDLE \
+			and not intro_active and not central_aberta and not entrada_segurada
 	_laco_de_atracao(passo)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(passo * 7.0, 0.0, 1.0))
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
@@ -1334,9 +1336,10 @@ func soltar_entrada() -> void:
 	_encerrar_ensaio()
 	entrada_segurada = false
 	Diario.marca("JOGO: liberado (abertura na tela)")
-	# O Arduino começa 3 s depois da abertura aparecer; a câmera, 1,5 s.
-	_perifericos_em = animation_time + 3.0
-	_diario_fecha_em = animation_time + 25.0
+	# Arduino e câmera só DEPOIS da animação de abertura (~5,5 s): o
+	# Arduino aos 6 s, a câmera aos 7 s. A luva da entrada anda sozinha.
+	_perifericos_em = animation_time + 6.0
+	_diario_fecha_em = animation_time + 40.0
 	# SÓ AGORA câmera e Arduino começam (e as janelas de permissão, se
 	# forem necessárias): o carregamento já terminou.
 	if camera_service != null:
@@ -2059,7 +2062,14 @@ func camera_liberou_a_rodada() -> bool:
 		return true
 	if camera_service != null and camera_service.pronta():
 		return true
-	return Time.get_ticks_msec() >= int(ESPERA_MAXIMA_DA_CAMERA * 1000.0)
+	return _camera_ja_teve_tempo()
+
+## A câmera acorda 1 s depois dos periféricos; a tolerância conta dali, e
+## não do início do aplicativo (senão o aviso "SEM CÂMERA" saía em cima da
+## animação de abertura, antes de a câmera sequer começar).
+func _camera_ja_teve_tempo() -> bool:
+	return not entrada_segurada \
+		and animation_time >= _perifericos_em + 1.0 + ESPERA_MAXIMA_DA_CAMERA
 
 ## A placa, e não o estado de descoberta/calibração do sensor, libera START.
 ## Uma linha válida do protocolo identifica que a porta aberta é realmente o
@@ -7288,6 +7298,10 @@ var _socorro_feito := false
 func _socorro_da_camera(delta: float) -> void:
 	if _socorro_feito or camera_service == null or medico == null:
 		return
+	# No Android o exame (relatório da Camera2) só roda na Central: sozinho,
+	# no meio do jogo, ele consultava o serviço de câmera na linha do jogo.
+	if OS.get_name() == "Android":
+		return
 	if not camera_enabled or camera_service.available():
 		# Já veio imagem: não há o que socorrer, e a contagem não recomeça
 		# — uma câmera que caiu depois de funcionar é caso da religação
@@ -7661,7 +7675,7 @@ func _draw_alertas_graves() -> void:
 	# SEM CÂMERA O JOGO SEGUE — e diz isso. Depois da espera inicial, a
 	# rodada começa sem foto; o aviso explica por que o ranking fica sem rosto.
 	if camera_enabled and camera_service != null and not camera_service.pronta() \
-			and Time.get_ticks_msec() >= int(ESPERA_MAXIMA_DA_CAMERA * 1000.0):
+			and _camera_ja_teve_tempo():
 		recados.append("SEM CÂMERA — O JOGO SEGUE SEM FOTO  •  " + camera_service.motivo_curto())
 	# Câmera é tratada na tela da pose com linguagem comum. O rodapé do jogo
 	# nunca expõe DLL, pacote, backend ou instruções de manutenção ao jogador.
