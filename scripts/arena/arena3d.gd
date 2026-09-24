@@ -40,7 +40,7 @@ const TEX_LONA := "res://assets/arena/lona.png"
 const TEX_BRILHO := "res://assets/arena/brilho.png"
 const TEX_FACHO := "res://assets/arena/facho.png"
 
-const COR_FUNDO := Color("07060b")
+const COR_FUNDO := Color("07051a")
 const TEX_TORCIDA_BAIXO := "res://assets/arena/torcida_baixo.png"
 const TEX_TORCIDA_CIMA := "res://assets/arena/torcida_cima.png"
 
@@ -167,7 +167,7 @@ func _montar_mundo() -> void:
 	_luz_chave.light_color = Color("fff1d8")
 	_luz_chave.rotation = Vector3(deg_to_rad(-52.0), deg_to_rad(28.0), 0.0)
 	_mundo.add_child(_luz_chave)
-	_rim_quente = _luz_pontual(Color("ff2a48"), Vector3(-2.3, 1.9, -0.6))
+	_rim_quente = _luz_pontual(Color("ff2aa0"), Vector3(-2.3, 1.9, -0.6))
 	_rim_frio = _luz_pontual(Color("33d6ff"), Vector3(2.3, 1.8, -0.6))
 
 	_montar_fundo()
@@ -289,9 +289,9 @@ func _montar_ringue() -> void:
 	corda.radial_segments = 12
 	corda.rings = 1
 	var tintas := [
-		_material_solido(Color("e8e9ee"), 0.35, 0.08),
-		_material_solido(Color("d8142e"), 0.35, 0.18),
-		_material_solido(Color("e8e9ee"), 0.35, 0.08),
+		_material_solido(Color("ffd014"), 0.35, 0.12),
+		_material_solido(Color("ff2ab0"), 0.35, 0.22),
+		_material_solido(Color("46dcff"), 0.35, 0.12),
 	]
 	for i in range(ALTURAS_DAS_CORDAS.size()):
 		var y: float = ALTURAS_DAS_CORDAS[i]
@@ -307,7 +307,7 @@ func _montar_fachos() -> void:
 	malha.size = Vector2(1.5, 6.0)
 	for i in range(3):
 		var mat := _material_plano(textura, true)
-		mat.albedo_color = [Color("ff4a6a"), Color("fff3dc"), Color("48d6ff")][i]
+		mat.albedo_color = [Color("ff3ab4"), Color("b58cff"), Color("48d6ff")][i]
 		var f := _peca(malha, mat, Vector3(-2.4 + 2.4 * float(i), 3.2, -4.3))
 		_fachos.append(f)
 
@@ -477,7 +477,9 @@ func _fator_da_tela() -> float:
 
 
 func _aplicar_tamanho() -> void:
-	var fator := _fator_da_tela() * (FATOR_MAGRO if _magro else 1.0)
+	# A RESOLUÇÃO NÃO CAI MAIS quando a máquina aperta: imagem encolhida
+	# e esticada é o "boneco em baixa resolução". O que cede é o MSAA.
+	var fator := _fator_da_tela()
 	var novo := Vector2i((TELA_LOGICA * fator).round())
 	if size != novo:
 		size = novo
@@ -547,6 +549,25 @@ func golpe(forca: float, derruba := false, pontos := -1, ultimo := false) -> Dic
 	return resposta
 
 
+## O CAMBALEIO do soco na tela: a câmera balança e rola um pouco, e o
+## balanço morre em `segundos`. Frequências e fases sorteadas: nunca
+## igual. Liso de propósito — nada de congelar a imagem.
+var _camb_t := -1.0
+var _camb_dur := 1.6
+var _camb := PackedFloat32Array()
+
+func cambalear(segundos: float) -> void:
+	_camb_t = 0.0
+	_camb_dur = maxf(segundos, 0.3)
+	_camb = PackedFloat32Array([
+		randf_range(2.6, 4.6), randf() * TAU, randf_range(0.05, 0.09),
+		randf_range(2.0, 3.8), randf() * TAU, randf_range(0.03, 0.06),
+		randf_range(1.6, 3.0), randf() * TAU, randf_range(0.05, 0.10),
+	])
+	_tremor = maxf(_tremor, 0.9)
+	_clarao = maxf(_clarao, 0.35)
+
+
 ## A TORCIDA REAGE: `intensidade` 0..1 por `segundos`, depois acalma.
 func agitar(intensidade: float, segundos := 4.0) -> void:
 	_agito_alvo = maxf(_agito_alvo, clampf(intensidade, 0.0, 1.0))
@@ -603,6 +624,10 @@ func avancar(delta: float) -> void:
 	_clarao = maxf(0.0, _clarao - delta * 2.4)
 	_empurrao = maxf(0.0, _empurrao - delta * 1.6)
 	_publico = maxf(0.0, _publico - delta * 0.72)
+	if _camb_t >= 0.0:
+		_camb_t += delta
+		if _camb_t > _camb_dur:
+			_camb_t = -1.0
 	if _relogio > _agito_ate:
 		_agito_alvo = maxf(0.0, _agito_alvo - delta * 0.35)
 	_agito = lerpf(_agito, maxf(_agito_alvo, _publico * 0.6), 1.0 - exp(-delta * 4.0))
@@ -655,8 +680,18 @@ func _camera() -> void:
 		var t := ease(caido, 0.5)
 		pos = pos.lerp(Vector3(0.0, _altura_da_camera * 0.54, _distancia * 1.07), t)
 		mira = mira.lerp(Vector3(0.0, _altura_da_mira * 0.58, 0.0), t)
+	var rolo := 0.0
+	if _camb_t >= 0.0 and _camb.size() >= 9:
+		var t := _camb_t
+		var some := pow(1.0 - clampf(t / _camb_dur, 0.0, 1.0), 1.6)
+		var c := _camb
+		pos += Vector3(sin(t * c[0] * TAU * 0.5 + c[1]) * c[2], sin(t * c[3] * TAU * 0.5 + c[4]) * c[5], 0.0) * some
+		mira += Vector3(sin(t * c[3] * TAU * 0.4 + c[1]) * c[2] * 0.6, 0.0, 0.0) * some
+		rolo = sin(t * c[6] * TAU * 0.5 + c[7]) * c[8] * some
 	camera.position = pos + sacode
 	camera.look_at(mira, Vector3.UP)
+	if absf(rolo) > 0.0001:
+		camera.rotate_object_local(Vector3.FORWARD, rolo)
 
 
 func _luzes() -> void:

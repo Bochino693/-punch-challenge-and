@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 RAIZ = Path(__file__).resolve().parents[1]
-FUNDO = (0x19, 0x06, 0x0D, 255)
+FUNDO = (0x10, 0x09, 0x1D, 255)
 SELO_CENTRO = (540, 900)
 SELO_TAMANHO = 560
 

@@ -3,8 +3,8 @@ extends RefCounted
 
 ## A PALETA DA MÁQUINA, NUM LUGAR SÓ.
 ##
-## Tema de arena: fundo escuro e peças azul-marinho fazem os números,
-## fotografias e LEDs neon saltarem mesmo em um salão iluminado.
+## Tema SUPER BOXING, o mesmo do gabinete: azul-noite com raios roxo,
+## magenta e azul, amarelo de faixa zebrada e o vermelho das luvas.
 ##
 ## POR QUE TUDO PASSA POR AQUI. Antes, cada arquivo carregava as suas
 ## próprias cores em hexadecimal — trocar o tema significava caçar
@@ -14,53 +14,53 @@ extends RefCounted
 
 # ---------------------------------------------------------------- fundo
 ## Céu do salão: claro em cima, quente perto do chão.
-const CEU_TOPO := Color("19060d")
-const CEU_BASE := Color("4a0918")
+const CEU_TOPO := Color("0b0620")
+const CEU_BASE := Color("2a0f5c")
 ## Piso do palco e as linhas de perspectiva.
-const PISO := Color("220710")
-const PISO_LINHA := Color("8f2330")
+const PISO := Color("140a30")
+const PISO_LINHA := Color("7a2eff")
 ## A luz do refletor, quente, caindo sobre o saco.
-const LUZ := Color("ffe044")
+const LUZ := Color("ffd014")
 ## Creme do miolo do letreiro: o fundo sobre o qual a marca é montada.
 const CREME := Color("f6fbff")
 
 # ---------------------------------------------------------------- peças
-const CARTAO := Color("330c16")
-const CARTAO_BORDA := Color("933042")
+const CARTAO := Color("1d1040")
+const CARTAO_BORDA := Color("6a3cff")
 ## Sombra padrão das peças. Azulada, não cinza: sombra cinza sobre fundo
 ## azul-claro parece sujeira.
 const SOMBRA := Color(0.0, 0.0, 0.0, 0.52)
 ## Fundo de campos e trilhos vazios.
-const VAZIO := Color("230912")
+const VAZIO := Color("150a2e")
 
 # ---------------------------------------------------------------- tinta
 const TINTA := Color("f4f8ff")        ## títulos e números
-const TINTA_FRACA := Color("ead1ca")  ## rótulos e apoio
-const TINTA_LEVE := Color("bd9691")   ## legendas discretas
+const TINTA_FRACA := Color("d9d1ff")  ## rótulos e apoio
+const TINTA_LEVE := Color("a197d6")   ## legendas discretas
 
 # ---------------------------------------------------------------- marca
 ## Tiradas da logo da casa: o vermelho do alvo e o azul do dardo.
-const VERMELHO := Color("ff1934")
-const CIANO := Color("ffdc27")
-const AMBAR := Color("ffdc27")
+const VERMELHO := Color("ff2a6d")
+const CIANO := Color("ffd014")
+const AMBAR := Color("ffd014")
 const VERDE := Color("32f2a0")
-const ROXO := Color("9965ff")
-const ROSA := Color("ff3047")
+const ROXO := Color("8a3cff")
+const ROSA := Color("ff26a8")
 ## Azul profundo do bezel do letreiro e das bordas fortes.
-const MARINHO := Color("260710")
+const MARINHO := Color("1a0b3a")
 ## Contorno das letras de fliperama. Quase preto, e não o marinho: o
 ## contorno grosso só funciona se for MUITO mais escuro que o
 ## preenchimento — é ele que segura a letra sobre qualquer fundo.
-const CONTORNO := Color("260710")
+const CONTORNO := Color("0e0624")
 ## O vidro escuro do visor de LED, e o brilho do reflexo em cima dele.
-const VISOR_FUNDO := Color("220911")
-const VISOR_VIDRO := Color("aa434c")
+const VISOR_FUNDO := Color("140a2e")
+const VISOR_VIDRO := Color("6a4cd8")
 
 ## Cores de festa — confete e fogos. Escurecidas o suficiente para
 ## aparecerem sobre um fundo claro; branco puro sumiria.
 const FESTA := [
-	Color("ff1934"), Color("ffda27"), Color("fff9ef"),
-	Color("ff6230"), Color("ffb713"), Color("e91230"),
+	Color("ff26a8"), Color("ffd014"), Color("fff9ef"),
+	Color("46dcff"), Color("8a3cff"), Color("ff6a2a"),
 ]
 
 # ---------------------------------------------------------------- saco

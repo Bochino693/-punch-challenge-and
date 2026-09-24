@@ -2,20 +2,25 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cdytbvaoxhuif"
-path="res://.godot/imported/torcida_baixo.png-139f58d480a29a5c0be74a953fe0550d.ctex"
+uid="uid://q4vp6x3lx8fk"
+path.s3tc="res://.godot/imported/boxeador_1.jpg-46aebcff1c3a8f4fb82eb5bad0f67fc9.s3tc.ctex"
+path.etc2="res://.godot/imported/boxeador_1.jpg-46aebcff1c3a8f4fb82eb5bad0f67fc9.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
+}
+generator_parameters={
+"md5": "f4d77504c18f17e385d1d8126ce6c802"
 }
 
 [deps]
 
-source_file="res://assets/arena/torcida_baixo.png"
-dest_files=["res://.godot/imported/torcida_baixo.png-139f58d480a29a5c0be74a953fe0550d.ctex"]
+source_file="res://assets/lutador3d/boxeador_1.jpg"
+dest_files=["res://.godot/imported/boxeador_1.jpg-46aebcff1c3a8f4fb82eb5bad0f67fc9.s3tc.ctex", "res://.godot/imported/boxeador_1.jpg-46aebcff1c3a8f4fb82eb5bad0f67fc9.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

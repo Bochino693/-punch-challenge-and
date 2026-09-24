@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cdytbvaoxhuif"
-path="res://.godot/imported/torcida_baixo.png-139f58d480a29a5c0be74a953fe0550d.ctex"
+uid="uid://bedqsmdrx2cmu"
+path="res://.godot/imported/fight.png-aa5bd2824cdc20da0e8c57294c5ad4d8.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/arena/torcida_baixo.png"
-dest_files=["res://.godot/imported/torcida_baixo.png-139f58d480a29a5c0be74a953fe0550d.ctex"]
+source_file="res://assets/tema/fight.png"
+dest_files=["res://.godot/imported/fight.png-aa5bd2824cdc20da0e8c57294c5ad4d8.ctex"]
 
 [params]
 

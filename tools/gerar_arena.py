@@ -50,11 +50,11 @@ def fundo() -> None:
     W, H = 1024, 768
     y = np.linspace(0.0, 1.0, H)[:, None]
     img = np.zeros((H, W, 3), np.float32)
-    topo, base = hexcor("06070d"), hexcor("1a0710")
+    topo, base = hexcor("06051a"), hexcor("1c0a3a")
     img[:] = topo * (1 - y[..., None]) + base * y[..., None]
 
     # Neblina colorida: magenta a esquerda, ciano a direita (as luzes de contorno).
-    img += disco_macio(H, W, H * 0.62, W * 0.12, W * 0.55, 1.6)[..., None] * hexcor("5a0b22") * 0.55
+    img += disco_macio(H, W, H * 0.62, W * 0.12, W * 0.55, 1.6)[..., None] * hexcor("5a0b5a") * 0.55
     img += disco_macio(H, W, H * 0.58, W * 0.90, W * 0.50, 1.6)[..., None] * hexcor("0b3a52") * 0.55
 
     # Plateia: fileiras de cabecas e ombros. As de tras menores e mais
@@ -74,12 +74,12 @@ def fundo() -> None:
         m = np.asarray(mask, np.float32) / 255.0
         m = blur(m, sig)
         contorno = np.clip(m - np.roll(m, 3, axis=0), 0, 1)
-        tom = hexcor(["120c16", "140b14", "170a12", "1a0a10"][fila])
+        tom = hexcor(["0e0b1c", "100a20", "120a24", "140a28"][fila])
         img = img * (1 - m[..., None] * 0.92) + tom * m[..., None] * 0.92
-        img += contorno[..., None] * (hexcor("ff3a66") * 0.5 + hexcor("45d8ff") * 0.5) * luz
+        img += contorno[..., None] * (hexcor("ff3ab4") * 0.5 + hexcor("45d8ff") * 0.5) * luz
 
     # Luzes de palco desfocadas (bokeh): celulares, placas, refletores.
-    paleta = [hexcor(c) for c in ("ffd35a", "ff3b55", "46dcff", "ffffff", "ff8a3a")]
+    paleta = [hexcor(c) for c in ("ffd35a", "ff3bb0", "46dcff", "ffffff", "9a5cff")]
     camada = np.zeros_like(img)
     for _ in range(170):
         cx, cy = rng.uniform(0, W), rng.uniform(H * 0.12, H * 0.80)
@@ -105,11 +105,11 @@ def fundo() -> None:
 
     # O telao de LED sobre a plateia: faixa escura com letreiro vermelho/ouro.
     faixa_y0, faixa_y1 = int(H * 0.18), int(H * 0.27)
-    img[faixa_y0:faixa_y1] = img[faixa_y0:faixa_y1] * 0.25 + hexcor("0a0306") * 0.75
+    img[faixa_y0:faixa_y1] = img[faixa_y0:faixa_y1] * 0.25 + hexcor("07041a") * 0.75
     texto = Image.new("L", (W, faixa_y1 - faixa_y0), 0)
     dt = ImageDraw.Draw(texto)
     fonte = ImageFont.truetype(FONTE, int((faixa_y1 - faixa_y0) * 0.62))
-    frase = "PUNCH CHALLENGE  •  LAZER SPORT  •  PUNCH CHALLENGE  •  LAZER SPORT  •  "
+    frase = "SUPER BOXING  •  FIGHT!  •  NEVER GIVE UP!  •  SUPER BOXING  •  LAZER SPORT  •  "
     dt.text((-40, (faixa_y1 - faixa_y0) * 0.14), frase, font=fonte, fill=255)
     t = np.asarray(texto, np.float32) / 255.0
     # Pontos de LED: a letra acesa em grade, com brilho em volta.
@@ -117,10 +117,10 @@ def fundo() -> None:
     led = t * grade
     brilho = blur(t, 3.0)
     cor_led = np.where((np.arange(W)[None, :] // 260) % 2 == 0, 1.0, 0.0)[..., None]
-    cor = hexcor("ff2440") * cor_led + hexcor("ffc93a") * (1 - cor_led)
+    cor = hexcor("ff2ab0") * cor_led + hexcor("ffd014") * (1 - cor_led)
     img[faixa_y0:faixa_y1] += led[..., None] * cor * 0.95 + brilho[..., None] * cor * 0.35
-    img[faixa_y0:faixa_y0 + 2] += hexcor("ff2440") * 0.35
-    img[faixa_y1 - 2:faixa_y1] += hexcor("ff2440") * 0.35
+    img[faixa_y0:faixa_y0 + 2] += hexcor("ff2ab0") * 0.35
+    img[faixa_y1 - 2:faixa_y1] += hexcor("ff2ab0") * 0.35
 
     # Vinheta: segura o olho no centro, onde o lutador fica.
     v = disco_macio(H, W, H * 0.55, W * 0.5, W * 0.95, 0.9)
@@ -135,7 +135,7 @@ def lona() -> None:
     """Lona do ringue vista de cima, com o emblema no centro e a luz do refletor."""
     N = 1024
     img = np.zeros((N, N, 3), np.float32)
-    img[:] = hexcor("1d2a48")
+    img[:] = hexcor("24155a")
     # Trama do tecido: ruido fino direcional.
     trama = rng.normal(0, 1, (N, N)).astype(np.float32)
     trama = nd.gaussian_filter(trama, (0.6, 2.2)) * 0.5 + nd.gaussian_filter(trama, (2.2, 0.6)) * 0.5
@@ -150,7 +150,7 @@ def lona() -> None:
     img[-b:] *= 0.55
     img[:, :b] *= 0.55
     img[:, -b:] *= 0.55
-    for off, cor in ((b, "e0213c"), (b + 10, "f0b33a")):
+    for off, cor in ((b, "ff2ab0"), (b + 10, "ffd014")):
         img[off:off + 4, off:N - off] = hexcor(cor)
         img[N - off - 4:N - off, off:N - off] = hexcor(cor)
         img[off:N - off, off:off + 4] = hexcor(cor)
@@ -163,20 +163,18 @@ def lona() -> None:
         m = np.clip((N * 0.2 - d) / 3.0, 0, 1)
         img = img * (1 - m[..., None] * 0.8) + hexcor(cor) * m[..., None] * 0.8
 
-    # Emblema central: anel duplo e o nome, em perspectiva ja correta
-    # (a textura e aplicada no plano do chao).
+    # Emblema central: anel duplo e o LOGO SUPER BOXING (o mesmo do
+    # gabinete, de tools/gerar_tema.py), já no plano do chão.
     em = Image.new("RGBA", (N, N), (0, 0, 0, 0))
     d = ImageDraw.Draw(em)
     c = N / 2
-    for r, w, cor in ((330, 16, (224, 33, 60, 235)), (300, 5, (240, 179, 58, 230)), (190, 5, (240, 179, 58, 200))):
+    for r, w, cor in ((350, 16, (255, 42, 176, 235)), (322, 5, (255, 208, 20, 230))):
         d.ellipse([c - r, c - r, c + r, c + r], outline=cor, width=w)
-    fonte = ImageFont.truetype(FONTE, 82)
-    fonte2 = ImageFont.truetype(FONTE_TEXTO, 54)
-    for texto, f, y, cor in (("PUNCH", fonte, c - 92, (246, 251, 255, 235)),
-                             ("CHALLENGE", fonte, c - 6, (255, 220, 39, 235)),
-                             ("LAZER SPORT", fonte2, c + 104, (246, 251, 255, 170))):
-        caixa = d.textbbox((0, 0), texto, font=f)
-        d.text((c - (caixa[2] - caixa[0]) / 2, y - (caixa[3] - caixa[1]) / 2), texto, font=f, fill=cor)
+    logo = Image.open(RAIZ / "assets" / "tema" / "logo.png").convert("RGBA")
+    lw = 560
+    lh = int(logo.height * lw / logo.width)
+    logo = logo.resize((lw, lh), Image.LANCZOS)
+    em.alpha_composite(logo, (int(c - lw / 2), int(c - lh / 2)))
     ema = np.asarray(em, np.float32) / 255.0
     # Tinta sobre tecido: um pouco gasta, nunca adesivo chapado.
     gasto = np.clip(1.0 - np.abs(nd.gaussian_filter(rng.normal(0, 1, (N, N)), 3)) * 0.6, 0.55, 1.0)

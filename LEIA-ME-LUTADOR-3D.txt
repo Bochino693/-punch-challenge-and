@@ -4,10 +4,13 @@ PUNCH CHALLENGE - LUTADOR 3D
 LUTADOR PRINCIPAL (build 77): O BOXEADOR
   assets/lutador3d/boxeador.glb - um boxeador humano de verdade: corpo
   atlético (MakeHuman/Anny, livre para uso comercial), pele pintada em
-  4096 px (poros, veias, cabelo degradê, barba por fazer, olhos),
-  calção de cetim vermelho com o cós LAZER SPORT e friso dourado, botas
-  de cano alto com cadarço, luvas esculpidas e 4 expressões no rosto
-  (deboche, dor, grito, apagado). Ver LICENCA_BOXEADOR.txt.
+  4096 px (poros, veias, cabelo degradê, barba por fazer, olhos), corpo
+  subdividido (62 mil triângulos), calção de cetim com cinturão
+  acolchoado (SUPER BOXING / LAZER SPORT, estrelas, costura), botas de
+  verdade (sola, biqueira, cano alto, cadarço em relevo, aro dourado),
+  luvas com polegar, velcro e punho que abraça o antebraço, e 4
+  expressões no rosto (deboche, dor, grito, apagado).
+  Ver LICENCA_BOXEADOR.txt.
 
   A animação é feita pelo jogo (scripts/arena/lutador_boxeador.gd):
     - PÉS PLANTADOS: um pé só sai do chão para dar um passo de verdade;

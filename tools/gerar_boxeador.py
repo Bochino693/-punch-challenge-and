@@ -331,68 +331,402 @@ def dentes(pt):
 
 
 # --------------------------------------------------------------- luvas
-def luva(pulso, junta, dedao, palma_n, lado):
-    """Luva de boxe por campo de distância: bulbo, polegar e punho."""
-    from skimage import measure
+# ---------------------------------------------------- campos de distância
+def _sd_elipsoide(p, c, r):
+    q = (p - c) / r
+    k0 = np.linalg.norm(q, axis=-1)
+    k1 = np.linalg.norm(q / r, axis=-1)
+    return k0 * (k0 - 1.0) / np.maximum(k1, 1e-9)
 
-    eixo = junta - pulso
-    comp = np.linalg.norm(eixo)
-    eixo = eixo / comp
+
+def _sd_cone_redondo(p, a, b, r1, r2):
+    """Cone de pontas redondas de a (raio r1) até b (raio r2)."""
+    ba = b - a
+    l2 = ba.dot(ba)
+    rr = r1 - r2
+    a2 = l2 - rr * rr
+    il2 = 1.0 / l2
+    pa = p - a
+    y = pa @ ba
+    z = y - l2
+    x = pa * l2 - y[..., None] * ba
+    x2 = np.einsum("...i,...i->...", x, x)
+    y2 = y * y * l2
+    z2 = z * z * l2
+    k = np.sign(rr) * rr * rr * x2
+    d = np.where(
+        np.sign(z) * a2 * z2 > k, np.sqrt(x2 + z2) * il2 - r2,
+        np.where(np.sign(y) * a2 * y2 < k, np.sqrt(x2 + y2) * il2 - r1,
+                 (np.sqrt(x2 * a2 * il2) + y * rr) * il2 - r1))
+    return d
+
+
+def _sd_caixa_redonda(p, c, meia, raio):
+    q = np.abs(p - c) - (meia - raio)
+    fora = np.linalg.norm(np.maximum(q, 0.0), axis=-1)
+    dentro = np.minimum(np.max(q, axis=-1), 0.0)
+    return fora + dentro - raio
+
+
+def _uniao(d1, d2, k):
+    h = np.clip(0.5 + 0.5 * (d2 - d1) / k, 0, 1)
+    return d2 * (1 - h) + d1 * h - k * h * (1 - h)
+
+
+def _malha_do_campo(campo, minimo, maximo, res):
+    """Marching cubes de uma função campo(P) numa caixa."""
+    from skimage import measure
+    eixos = [np.arange(minimo[k], maximo[k] + res, res) for k in range(3)]
+    X, Y, Z = np.meshgrid(*eixos, indexing="ij")
+    P = np.stack([X, Y, Z], -1)
+    d = campo(P)
+    verts, faces, nrm, _ = measure.marching_cubes(d, 0.0, spacing=(res, res, res))
+    verts = verts + np.asarray(minimo)
+    return verts.astype(np.float64), faces[:, ::-1].astype(np.uint32), (-nrm).astype(np.float64)
+
+
+# --------------------------------------------------------------- luvas
+def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
+    """Luva de boxe de verdade: corpo acolchoado, dorso, polegar colado,
+    punho alinhado com o ANTEBRAÇO (é ele que o punho abraça) e a faixa
+    de velcro."""
+    eixo = eixo_do_antebraco / np.linalg.norm(eixo_do_antebraco)
+    comp = np.linalg.norm(junta - pulso)
     lateral = dedao - pulso
     lateral = lateral - eixo * lateral.dot(eixo)
     lateral /= np.linalg.norm(lateral)
     normal = np.cross(eixo, lateral)
     if normal.dot(palma_n) < 0:
         normal = -normal
-    base = np.stack([lateral, normal, eixo], 1)  # colunas: x=polegar, y=palma, z=dedos
-    esc = comp / 0.105  # tudo em proporção da mão
+    base = np.stack([lateral, normal, eixo], 1)  # x=polegar, y=palma, z=dedos
+    s = comp / 0.105
+    A = lambda *v: np.array(v) * s
 
-    def elipsoide(p, c, r):
-        q = (p - c) / r
-        k = np.linalg.norm(q, axis=-1)
-        return (k - 1.0) * np.min(r)
+    def campo(P):
+        corpo = _sd_caixa_redonda(P, A(0.0, -0.004, 0.112), A(0.055, 0.049, 0.080), 0.036 * s)
+        punho = _sd_elipsoide(P, A(0.0, -0.002, 0.150), A(0.060, 0.053, 0.052))
+        dorso = _sd_elipsoide(P, A(0.0, -0.026, 0.112), A(0.056, 0.036, 0.084))
+        polegar = _sd_cone_redondo(P, A(0.052, 0.020, 0.050), A(0.047, 0.030, 0.128), 0.0215 * s, 0.019 * s)
+        cano = _sd_cone_redondo(P, A(0.0, 0.0, -0.080), A(0.0, 0.0, 0.026), 0.044 * s, 0.048 * s)
+        faixa = _sd_cone_redondo(P, A(0.0, 0.0, -0.052), A(0.0, 0.0, -0.022), 0.0475 * s, 0.0485 * s)
+        d = _uniao(corpo, punho, 0.03 * s)
+        d = _uniao(d, dorso, 0.025 * s)
+        d = _uniao(d, polegar, 0.009 * s)
+        d = _uniao(d, cano, 0.035 * s)
+        return np.minimum(d, faixa)
 
-    def capsula(p, a, b, r):
-        pa, ba = p - a, b - a
-        t = np.clip((pa @ ba) / ba.dot(ba), 0, 1)
-        return np.linalg.norm(pa - t[..., None] * ba, axis=-1) - r
-
-    def uniao(d1, d2, k):
-        h = np.clip(0.5 + 0.5 * (d2 - d1) / k, 0, 1)
-        return d2 * (1 - h) + d1 * h - k * h * (1 - h)
-
-    res = 0.0052 * esc
-    ext = 0.25 * esc
-    g = np.arange(-ext, ext + res, res)
-    X, Y, Z = np.meshgrid(g, g, g, indexing="ij")
-    P = np.stack([X, Y, Z], -1)  # espaço local (polegar, palma, dedos)
-    s = esc
-    corpo_l = elipsoide(P, np.array([0.0, -0.004, 0.108]) * s, np.array([0.064, 0.057, 0.098]) * s)
-    dorso = elipsoide(P, np.array([0.0, -0.018, 0.140]) * s, np.array([0.058, 0.046, 0.066]) * s)
-    polegar = capsula(P, np.array([0.056, 0.020, 0.048]) * s, np.array([0.050, 0.032, 0.122]) * s, 0.023 * s)
-    cano = capsula(P, np.array([0.0, 0.0, -0.088]) * s, np.array([0.0, 0.0, 0.03]) * s, 0.047 * s)
-    d = uniao(corpo_l, dorso, 0.03 * s)
-    d = uniao(d, polegar, 0.010 * s)
-    d = uniao(d, cano, 0.04 * s)
-    verts, faces, nrm, _ = measure.marching_cubes(d, 0.0, spacing=(res, res, res))
-    verts = verts - ext
-    faces = faces[:, ::-1]
-    nrm = -nrm
-    # cor por região: punho branco com friso, corpo vermelho, palma mais escura
-    loc = verts
-    cor = np.tile(np.array([0.78, 0.04, 0.06], np.float32), (len(loc), 1))
+    loc, faces, nrm = _malha_do_campo(campo, A(-0.085, -0.085, -0.10), A(0.085, 0.085, 0.215), 0.0045 * s)
     z = loc[:, 2] / s
-    cano_m = z < -0.005
-    cor[cano_m] = [0.93, 0.93, 0.92]
-    friso = (z < -0.030) & (z > -0.046)
-    cor[friso] = [0.80, 0.05, 0.07]
-    friso2 = (z < -0.062) & (z > -0.072)
-    cor[friso2] = [0.80, 0.05, 0.07]
-    palma = (loc[:, 1] / s > 0.030) & (z > 0.02)
-    cor[palma] = cor[palma] * 0.82
+    cor = np.tile(np.array([0.74, 0.025, 0.05], np.float32), (len(loc), 1))
+    cor[z < 0.0] = [0.93, 0.93, 0.92]                            # punho branco
+    faixa = (z > -0.052) & (z < -0.020)
+    cor[faixa] = [0.70, 0.02, 0.05]                              # velcro vermelho
+    for a, b in ((-0.046, -0.042), (-0.031, -0.027)):
+        cor[(z > a) & (z < b)] = [0.95, 0.95, 0.94]              # frisos brancos
+    cor[z < -0.074] = [0.12, 0.10, 0.12]                          # borda do punho
+    palma = (loc[:, 1] / s > 0.034) & (z > 0.03)
+    cor[palma] = [0.55, 0.02, 0.04]                              # palma mais escura
+    # costura do polegar: fio escuro onde o polegar encontra o corpo
+    pol = _sd_cone_redondo(loc, A(0.052, 0.020, 0.050), A(0.047, 0.030, 0.128), 0.0215 * s, 0.019 * s)
+    cor[(np.abs(pol) < 0.0035 * s) & (z > 0.02)] = [0.35, 0.01, 0.03]
     mundo = loc @ base.T + pulso
-    nmundo = nrm @ base.T
-    return mundo.astype(np.float32), faces.astype(np.uint32), nmundo.astype(np.float32), cor
+    return mundo.astype(np.float32), faces, (nrm @ base.T).astype(np.float32), cor
+
+
+# --------------------------------------------------------------- botas
+def bota(pos, lado):
+    """Bota de boxe com forma de bota: sola de borracha, biqueira redonda,
+    cano alto até a metade da canela e cadarço em relevo."""
+    I = NOMES.index
+    tornozelo = pos[I(f"{lado}Foot")]
+    ponta = pos[I(f"{lado}Toe_End")]
+    joelho = pos[I(f"{lado}Leg")]
+    frente = ponta - tornozelo
+    frente[1] = 0.0
+    frente /= np.linalg.norm(frente)
+    fora = np.cross(np.array([0.0, 1.0, 0.0]), frente)
+    if fora[0] * np.sign(tornozelo[0]) < 0:
+        fora = -fora
+    base = np.stack([fora, np.array([0.0, 1.0, 0.0]), frente], 1)
+    origem = np.array([tornozelo[0], 0.0, tornozelo[2]])
+    perna = (joelho - tornozelo) @ base          # eixo da canela no espaço da bota
+    perna_dir = perna / np.linalg.norm(perna)
+    topo_t = 0.44                                  # fração do caminho tornozelo -> joelho
+    tor = (tornozelo - origem) @ base
+    topo = tor + perna * topo_t
+    comp = np.linalg.norm(ponta - tornozelo)
+    s = comp / 0.205
+
+    def pegada(P):
+        # contorno do solado: calcanhar, planta e ponta
+        calc = np.linalg.norm(P[..., [0, 2]] - np.array([0.0, -0.036 * s]), axis=-1) - 0.037 * s
+        planta = np.linalg.norm(P[..., [0, 2]] - np.array([0.004 * s, 0.118 * s]), axis=-1) - 0.049 * s
+        dedo = np.linalg.norm(P[..., [0, 2]] - np.array([0.0, 0.168 * s]), axis=-1) - 0.034 * s
+        d2 = _uniao(_uniao(calc, planta, 0.06 * s), dedo, 0.03 * s)
+        return d2
+
+    def solado(P):
+        d2 = pegada(P) + 0.004 * s
+        dy = np.abs(P[..., 1] - 0.011 * s) - 0.011 * s
+        return np.maximum(d2, dy)
+
+    def cabedal(P):
+        calcanhar = _sd_cone_redondo(P, A(0, 0.045, -0.040), A(0, 0.052, 0.02), 0.037 * s, 0.040 * s)
+        peito = _sd_cone_redondo(P, A(0, 0.052, 0.02), A(0.004, 0.036, 0.120), 0.040 * s, 0.040 * s)
+        bico = _sd_elipsoide(P, A(0.0, 0.030, 0.150), A(0.042, 0.028, 0.040))
+        cano = _sd_cone_redondo(P, tor + np.array([0, 0.01 * s, -0.004 * s]), topo, 0.043 * s, 0.049 * s)
+        d = _uniao(calcanhar, peito, 0.03 * s)
+        d = _uniao(d, bico, 0.03 * s)
+        d = _uniao(d, cano, 0.035 * s)
+        # corta o que desceria abaixo do solado
+        return np.maximum(d, -(P[..., 1] - 0.012 * s))
+
+    def A(*v):
+        return np.array(v) * s
+
+    def frente_da_bota(y):
+        """Ponto da superfície da frente do cano/peito numa altura y."""
+        t = np.clip((y - tor[1]) / max(topo[1] - tor[1], 1e-6), 0, 1)
+        eixo_p = tor + (topo - tor) * t
+        # anda para a frente (+z) até sair da bota
+        lo, hi = 0.0, 0.2 * s
+        for _ in range(30):
+            mid = (lo + hi) / 2
+            q = eixo_p + np.array([0, 0, mid])
+            q[1] = y
+            if cabedal(q[None, :])[0] < 0:
+                lo = mid
+            else:
+                hi = mid
+        q = eixo_p + np.array([0, 0, lo])
+        q[1] = y
+        return q
+
+    # cadarço: xis do peito do pé até o topo
+    furos = []
+    alturas = np.linspace(0.055 * s, topo[1] - 0.018 * s, 8)
+    for y in alturas:
+        c = frente_da_bota(y)
+        furos.append((c + np.array([0.013 * s, 0, 0.002 * s]), c + np.array([-0.013 * s, 0, 0.002 * s])))
+
+    def cadarco(P):
+        d = np.full(P.shape[:-1], 9.0)
+        for k in range(len(furos) - 1):
+            (e0, d0), (e1, d1) = furos[k], furos[k + 1]
+            d = np.minimum(d, _sd_cone_redondo(P, e0, d1, 0.0036 * s, 0.0036 * s))
+            d = np.minimum(d, _sd_cone_redondo(P, d0, e1, 0.0036 * s, 0.0036 * s))
+        return d
+
+    def campo(P):
+        return np.minimum(np.minimum(_uniao(solado(P), cabedal(P), 0.006 * s), cadarco(P)), 9.0)
+
+    lo = np.array([-0.075 * s, 0.0 - 0.004, -0.095 * s])
+    hi = np.array([0.075 * s, topo[1] + 0.03 * s, 0.215 * s])
+    loc, faces, nrm = _malha_do_campo(campo, lo, hi, 0.0032 * s)
+    y = loc[:, 1]
+    cor = np.tile(np.array([0.035, 0.033, 0.04], np.float32), (len(loc), 1))
+    ruido = np.sin(loc[:, 0] * 900) * np.sin(loc[:, 2] * 700) * 0.01
+    cor += ruido[:, None]
+    cor[y < 0.021 * s] = [0.88, 0.87, 0.84]                       # sola branca
+    cor[(y < 0.024 * s) & (y >= 0.021 * s)] = [0.20, 0.19, 0.2]    # vira
+    aro = y > topo[1] - 0.011 * s
+    cor[aro] = [0.95, 0.72, 0.10]                                  # aro dourado
+    cor[cadarco(loc) < 0.0015 * s] = [0.95, 0.95, 0.93]            # cadarço branco
+    mundo = loc @ base.T + origem
+    nm = nrm @ base.T
+    # pele de ossos: cano -> canela, pé -> pé, ponta -> dedos
+    w = np.zeros((len(loc), len(NOMES)), np.float32)
+    subida = np.clip((y - (tor[1] + 0.00)) / (0.07 * s), 0, 1)
+    subida = subida * subida * (3 - 2 * subida)
+    dedo_z = ((pos[I(f"{lado}ToeBase")] - origem) @ base)[2]
+    dedos = np.clip((loc[:, 2] - (dedo_z - 0.015 * s)) / (0.035 * s), 0, 1) * (1 - subida)
+    w[:, I(f"{lado}Leg")] = subida
+    w[:, I(f"{lado}ToeBase")] = dedos
+    w[:, I(f"{lado}Foot")] = 1 - subida - dedos
+    return mundo.astype(np.float32), faces, nm.astype(np.float32), cor, w, topo_t
+
+
+# ------------------------------------------------------------- cinturão
+def cinturao(cv, cintura, pesos_de):
+    """O cós do calção como PEÇA: faixa acolchoada em volta da cintura,
+    com textura própria (nome, estrelas, costura e frisos)."""
+    altura = 0.066
+    y0, y1 = cintura - altura + 0.004, cintura + 0.006
+    centro_x = 0.0
+    zona = cv[(cv[:, 1] > y0 - 0.01) & (cv[:, 1] < y1 + 0.01)]
+    centro_z = (zona[:, 2].max() + zona[:, 2].min()) * 0.5
+    angulos = 128
+    niveis = 9
+    P, UV, N = [], [], []
+    raio_tab = np.zeros((niveis, angulos))
+    for j in range(niveis):
+        y = y0 + (y1 - y0) * j / (niveis - 1)
+        fatia = cv[np.abs(cv[:, 1] - y) < 0.012]
+        ang = np.arctan2(fatia[:, 0] - centro_x, fatia[:, 2] - centro_z)
+        rad = np.hypot(fatia[:, 0] - centro_x, fatia[:, 2] - centro_z)
+        for k in range(angulos):
+            a = -np.pi + 2 * np.pi * k / angulos
+            dif = np.abs((ang - a + np.pi) % (2 * np.pi) - np.pi)
+            perto = dif < 0.12
+            raio_tab[j, k] = rad[perto].max() if perto.any() else np.nan
+    # preenche buracos e alisa em volta
+    for j in range(niveis):
+        linha = raio_tab[j]
+        ok = ~np.isnan(linha)
+        linha[~ok] = np.interp(np.nonzero(~ok)[0], np.nonzero(ok)[0], linha[ok], period=angulos)
+        raio_tab[j] = nd.uniform_filter1d(linha, 5, mode="wrap")
+    rmax = raio_tab.max(axis=0)
+    # perfil: dobra de dentro embaixo, a faixa acolchoada, dobra de dentro em cima
+    perfil = [(-0.004, -0.012, 0.0)]
+    for j in range(niveis):
+        v = j / (niveis - 1)
+        perfil.append((y0 + (y1 - y0) * v - y0, 0.004 + 0.006 * np.sin(np.pi * v) ** 0.6, v))
+    perfil.append((y1 - y0 + 0.003, -0.010, 1.0))
+    for dy, folga, v in perfil:
+        y = y0 + dy
+        for k in range(angulos + 1):
+            kk = k % angulos
+            a = -np.pi + 2 * np.pi * k / angulos
+            r = rmax[kk] + folga
+            P.append([centro_x + np.sin(a) * r, y, centro_z + np.cos(a) * r])
+            UV.append([k / angulos, 1.0 - v])
+            N.append([np.sin(a), 0.0, np.cos(a)])
+    niveis = len(perfil)
+    P = np.array(P, np.float32)
+    F = []
+    L = angulos + 1
+    for j in range(niveis - 1):
+        for k in range(angulos):
+            a0 = j * L + k
+            F += [[a0, a0 + 1, a0 + L], [a0 + 1, a0 + L + 1, a0 + L]]
+    F = np.array(F, np.uint32)
+    n = normais(P.astype(np.float64), F.astype(np.int64)).astype(np.float32)
+    jj, ww = pesos_de(P)
+    return P, F, n, np.array(UV, np.float32), jj, ww
+
+
+def textura_do_cinturao(largura=2048, altura=256):
+    img = Image.new("RGB", (largura, altura), (0, 0, 0))
+    a = np.linspace(0, 1, altura)[:, None]
+    ouro = np.array([226, 168, 34]) * (0.82 + 0.3 * np.sin(a * np.pi)) + np.array([30, 20, 0]) * a
+    arr = np.broadcast_to(ouro[:, None, :], (altura, largura, 3)).copy()
+    arr += np.random.default_rng(3).normal(0, 4, arr.shape)
+    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+    d = ImageDraw.Draw(img)
+    # frisos: magenta e branco em cima e embaixo
+    for y, h, c in ((0, 14, (40, 10, 70)), (14, 10, (255, 255, 255)), (24, 6, (255, 42, 176)),
+                    (altura - 30, 6, (255, 42, 176)), (altura - 24, 10, (255, 255, 255)), (altura - 14, 14, (40, 10, 70))):
+        d.rectangle([0, y, largura, y + h], fill=c)
+    # costura tracejada
+    for y in (40, altura - 44):
+        for x in range(0, largura, 22):
+            d.line([x, y, x + 12, y], fill=(120, 80, 10), width=3)
+    fonte = ImageFont.truetype(FONTE, 118)
+    fonte2 = ImageFont.truetype(str(RAIZ / "assets" / "fonts" / "SairaCondensed-ExtraBold.ttf"), 96)
+
+    def escreve(texto, cx, f, cor_, contorno):
+        caixa = d.textbbox((0, 0), texto, font=f)
+        x = cx - (caixa[2] - caixa[0]) / 2
+        y = altura / 2 - (caixa[3] + caixa[1]) / 2
+        for dx in range(-4, 5, 2):
+            for dy in range(-4, 5, 2):
+                d.text((x + dx, y + dy), texto, font=f, fill=contorno)
+        d.text((x, y), texto, font=f, fill=cor_)
+
+    escreve("SUPER BOXING", largura * 0.5, fonte, (150, 8, 30), (255, 240, 200))
+    escreve("LAZER SPORT", largura * 0.0 + 1, fonte2, (40, 10, 70), (255, 240, 200))
+    escreve("LAZER SPORT", largura * 1.0 - 1, fonte2, (40, 10, 70), (255, 240, 200))
+
+    def estrela(cx, cy, r, c):
+        pts = []
+        for k in range(10):
+            ang = -np.pi / 2 + k * np.pi / 5
+            rr = r if k % 2 == 0 else r * 0.45
+            pts.append((cx + np.cos(ang) * rr, cy + np.sin(ang) * rr))
+        d.polygon(pts, fill=c, outline=(60, 20, 10))
+
+    for cx in (largura * 0.25, largura * 0.75):
+        estrela(cx, altura / 2, 52, (255, 255, 255))
+        estrela(cx - 110, altura / 2, 30, (150, 8, 30))
+        estrela(cx + 110, altura / 2, 30, (150, 8, 30))
+    return img
+
+
+# ---------------------------------------------------------- subdivisão
+def subdividir(v, f, fuv, uv, canais=()):
+    """Subdivisão Loop uma vez: 4 triângulos por triângulo, superfície
+    alisada. Os canais (pesos, expressões...) passam pela mesma conta
+    linear que as posições, e o UV é dividido por face (as costuras do
+    mapa continuam costuras)."""
+    import scipy.sparse as sp
+    nv = len(v)
+    arestas = np.sort(np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]), axis=1)
+    unicas, inv, conta = np.unique(arestas, axis=0, return_inverse=True, return_counts=True)
+    inv = inv.reshape(3, -1).T                    # aresta de cada lado de cada face
+    ne = len(unicas)
+    borda_aresta = conta == 1
+    borda_v = np.zeros(nv, bool)
+    borda_v[unicas[borda_aresta].ravel()] = True
+    linhas, cols, vals = [], [], []
+    # para cada face e lado, o vértice oposto (regra 3/8 - 1/8)
+    opo = np.stack([f[:, 2], f[:, 0], f[:, 1]], 1)   # oposto às arestas (0,1),(1,2),(2,0)
+    e_ids = inv.ravel()
+    o_ids = opo.ravel()
+    # aresta interna: 3/8 (a+b) + 1/8 (c+d); de borda: 1/2 (a+b)
+    ea, eb = unicas[:, 0], unicas[:, 1]
+    peso_ab = np.where(borda_aresta, 0.5, 0.375)
+    linhas += [nv + np.arange(ne), nv + np.arange(ne)]
+    cols += [ea, eb]
+    vals += [peso_ab, peso_ab]
+    interna = ~borda_aresta[e_ids]
+    linhas.append(nv + e_ids[interna])
+    cols.append(o_ids[interna])
+    vals.append(np.full(interna.sum(), 0.125))
+    # vértices originais
+    viz = sp.coo_matrix((np.ones(len(ea) * 2), (np.concatenate([ea, eb]), np.concatenate([eb, ea]))),
+                        shape=(nv, nv)).tocsr()
+    grau = np.asarray(viz.sum(1)).ravel()
+    beta = np.where(grau > 3, 3.0 / (8.0 * np.maximum(grau, 1)), 3.0 / 16.0)
+    interno = ~borda_v
+    viz_i = viz.tocoo()
+    m = interno[viz_i.row]
+    linhas.append(viz_i.row[m])
+    cols.append(viz_i.col[m])
+    vals.append(beta[viz_i.row[m]])
+    linhas.append(np.nonzero(interno)[0])
+    cols.append(np.nonzero(interno)[0])
+    vals.append(1.0 - grau[interno] * beta[interno])
+    # vértice de borda: 3/4 v + 1/8 dos dois vizinhos de borda
+    vb = sp.coo_matrix((np.ones(borda_aresta.sum() * 2),
+                        (np.concatenate([ea[borda_aresta], eb[borda_aresta]]),
+                         np.concatenate([eb[borda_aresta], ea[borda_aresta]]))), shape=(nv, nv)).tocoo()
+    linhas.append(vb.row)
+    cols.append(vb.col)
+    vals.append(np.full(len(vb.row), 0.125))
+    idx_b = np.nonzero(borda_v)[0]
+    linhas.append(idx_b)
+    cols.append(idx_b)
+    vals.append(np.full(len(idx_b), 0.75))
+    S = sp.coo_matrix((np.concatenate(vals), (np.concatenate(linhas), np.concatenate(cols))),
+                      shape=(nv + ne, nv)).tocsr()
+    novo_v = S @ v
+    saida = [S @ c if c.ndim == 2 else S @ c for c in canais]
+    # faces novas
+    e01, e12, e20 = nv + inv[:, 0], nv + inv[:, 1], nv + inv[:, 2]
+    a, b, c = f[:, 0], f[:, 1], f[:, 2]
+    nf = np.concatenate([np.stack([a, e01, e20], 1), np.stack([e01, b, e12], 1),
+                         np.stack([e20, e12, c], 1), np.stack([e01, e12, e20], 1)])
+    # UV: pontos médios das arestas do MAPA (por face)
+    ua = np.sort(np.concatenate([fuv[:, [0, 1]], fuv[:, [1, 2]], fuv[:, [2, 0]]]), axis=1)
+    uu, uinv = np.unique(ua, axis=0, return_inverse=True)
+    uinv = uinv.reshape(3, -1).T
+    nuv = len(uv)
+    novo_uv = np.concatenate([uv, (uv[uu[:, 0]] + uv[uu[:, 1]]) * 0.5])
+    t01, t12, t20 = nuv + uinv[:, 0], nuv + uinv[:, 1], nuv + uinv[:, 2]
+    ta, tb, tc = fuv[:, 0], fuv[:, 1], fuv[:, 2]
+    nfuv = np.concatenate([np.stack([ta, t01, t20], 1), np.stack([t01, tb, t12], 1),
+                           np.stack([t20, t12, tc], 1), np.stack([t01, t12, t20], 1)])
+    return novo_v, nf, nfuv, novo_uv, saida
 
 
 # ------------------------------------------------------------------ glb
@@ -561,7 +895,7 @@ def regioes(v, pos, w, dono):
         canela = np.where(np.isin(dono, [i(f"{lado}Leg"), i(f"{lado}Foot"), i(f"{lado}ToeBase")]), t, canela)
     r["canela_t"] = canela
     pes = np.isin(dono, [i("LeftFoot"), i("RightFoot"), i("LeftToeBase"), i("RightToeBase")])
-    r["bota"] = pes | (np.isin(dono, [i("LeftLeg"), i("RightLeg")]) & (canela > 0.74))
+    r["bota"] = pes | (np.isin(dono, [i("LeftLeg"), i("RightLeg")]) & (canela > 0.60))
     r["mao"] = np.isin(dono, [i("LeftHand"), i("RightHand")])
     r["cintura"] = cintura
     return r
@@ -683,6 +1017,11 @@ def construir(pintar=True):
         "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 0.38})
     mat_luva = glb.material(name="Luva", pbrMetallicRoughness={
         "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 0.26})
+    mat_bota = glb.material(name="Bota", pbrMetallicRoughness={
+        "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 0.34})
+    mat_cinto = glb.material(name="Cinturao", pbrMetallicRoughness={
+        "baseColorTexture": {"index": glb.imagem(textura_do_cinturao(), "JPEG")},
+        "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.15, "roughnessFactor": 0.32})
     if pintar:
         tp = glb.imagem(img_pele, "JPEG")
         tn = glb.imagem(img_relevo, "PNG")
@@ -694,17 +1033,26 @@ def construir(pintar=True):
 
     malhas = []
     # ---- pele: sem as mãos (vão dentro da luva) e sem o que a roupa cobre.
-    escondido = anel(r["calcao"], f, 2) | anel(r["bota"], f, 1) | r["mao"]
+    escondido = anel(r["calcao"], f, 2) | r["bota"] | r["mao"]
     tri = ~(escondido[f].all(1) | r["mao"][f].any(1))
     fp, fuvp = f[tri], fuv[tri]
-    vi, ti, ind = separar_uv(fp, fuvp)
-    p = v[vi]
-    nn = n[vi]
-    uu = uv[ti]
+    # MAIS DEFINIÇÃO: uma subdivisão Loop do corpo (4x os triângulos),
+    # com pesos e expressões passando pela mesma conta.
+    expr = para_gltf(d["expressoes"])            # (E, V, 3)
+    ne_ = expr.shape[0]
+    canal_expr = np.transpose(expr, (1, 0, 2)).reshape(len(v), -1)
+    v2, f2, fuv2, uv2, (w2, e2) = subdividir(v, fp, fuvp, uv, canais=(w, canal_expr))
+    n2 = normais(v2, f2)
+    vi, ti, ind = separar_uv(f2, fuv2)
+    p = v2[vi]
+    nn = n2[vi]
+    uu = uv2[ti]
     tan = tangentes(p, nn, uu, ind)
-    alvos = para_gltf(d["expressoes"])[:, vi]
+    j2, p2_ = top4(np.asarray(w2)[vi])
+    alvos = np.transpose(np.asarray(e2)[vi].reshape(len(vi), ne_, 3), (1, 0, 2))
+    print("pele:", len(p), "vértices,", len(ind), "triângulos")
     malhas.append(("Pele", glb.malha("Pele", p, nn, ind, mat_pele, uv=uu, tan=tan,
-                                      juntas=juntas[vi], pesos=pesos[vi],
+                                      juntas=j2, pesos=p2_,
                                       alvos=alvos, nomes_alvos=list(EXPRESSOES))))
 
     # ---- calção e botas: cascas alisadas, afastadas da pele.
@@ -712,8 +1060,7 @@ def construir(pintar=True):
     folga = 0.011 + 0.022 * suave(0.18, 0.46, r["coxa_t"]) + 0.004 * suave(r["cintura"] - 0.04, r["cintura"], y)
     folga += 0.006 * suave(0.2, 0.0, np.abs(v[:, 0]))  # cavalo mais folgado
     cv, ci, usados, cb = casca(v, f, n, r["calcao"], folga, a, grau, alisa=10)
-    bota_folga = 0.0065 + 0.008 * np.clip(-n[:, 1], 0, 1) ** 2
-    bv, bi, busados, bb = casca(v, f, n, r["bota"], bota_folga, a, grau, alisa=24)
+
     # BAINHA RETA: a borda da casca vai exatamente para a linha do corte
     # (sem o serrilhado dos triângulos).
     I = NOMES.index
@@ -723,16 +1070,11 @@ def construir(pintar=True):
         perna = cb & (r["coxa_t"] > 0.25) & (np.sign(v[:, 0]) == np.sign(a0[0]))
         t = ao_longo(cv[perna], a0, b0)
         cv[perna] += np.outer(0.47 - t, ab)
-        a1, b1 = pos[I(f"{lado}Leg")], pos[I(f"{lado}Foot")]
-        ab1 = b1 - a1
-        cano = bb & (r["canela_t"] > 0.5) & (v[:, 1] > 0.12) & (np.sign(v[:, 0]) == np.sign(a1[0]))
-        t = ao_longo(bv[cano], a1, b1)
-        bv[cano] += np.outer(0.745 - t, ab1)
     cintura = cb & (v[:, 1] > r["cintura"] - 0.05)
     cv[cintura, 1] = r["cintura"] + 0.004
-    cv, bv = cv[usados], bv[busados]
-    for nome, vv, ii, us in (("Calcao", cv, ci, usados), ("Botas", bv, bi, busados)):
-        tri_mask = np.isin(f, us).all(1) & (r["calcao"] if nome == "Calcao" else r["bota"])[f].all(1)
+    cv = cv[usados]
+    for nome, vv, ii, us in (("Calcao", cv, ci, usados),):
+        tri_mask = np.isin(f, us).all(1) & r["calcao"][f].all(1)
         fuv_c = fuv[tri_mask]
         vi2, ti2, ind2 = separar_uv(ii, fuv_c)
         p2 = vv[vi2]
@@ -747,6 +1089,22 @@ def construir(pintar=True):
     if len(ff):
         malhas.append(("Friso", glb.malha("Friso", fv, fn_, ff, mat_luva, cor=fc, juntas=fj, pesos=fw)))
 
+    # ---- o cinturão (cós acolchoado) e as botas: peças próprias.
+    from scipy.spatial import cKDTree
+    arvore = cKDTree(v)
+
+    def pesos_de(P):
+        _, idx = arvore.query(P, k=4)
+        ww_ = w[idx].mean(1)
+        return top4(ww_)
+
+    cp, cf, cn, cuv, cj, cw = cinturao(cv, r["cintura"], pesos_de)
+    malhas.append(("Cinturao", glb.malha("Cinturao", cp, cn, cf, mat_cinto, uv=cuv, juntas=cj, pesos=cw)))
+    for lado in ("Left", "Right"):
+        bp, bf, bn, bc, bw, _ = bota(pos, lado)
+        bj, bw4 = top4(bw)
+        malhas.append((f"Bota{lado}", glb.malha(f"Bota{lado}", bp, bn, bf, mat_bota, cor=bc, juntas=bj, pesos=bw4)))
+
     # ---- dentes de cima: só aparecem com a boca aberta (grito, dor).
     dv, df_, dn, dc = dentes(ctx_pontos)
     k = NOMES.index("Head")
@@ -760,7 +1118,8 @@ def construir(pintar=True):
         junta = cab[rot.index(f"finger3-1.{s}")]
         dedao = cab[rot.index(f"finger1-2.{s}")]
         medial = np.array([-np.sign(pulso[0]), 0.0, 0.0])
-        lv, lf, ln, lc = luva(pulso, junta, dedao, medial, s)
+        cotovelo = cab[rot.index(f"lowerarm01.{s}")]
+        lv, lf, ln, lc = luva(pulso, junta, dedao, medial, s, pulso - cotovelo)
         k = NOMES.index(f"{lado}Hand")
         jj = np.zeros((len(lv), 4), np.uint16)
         jj[:, 0] = k

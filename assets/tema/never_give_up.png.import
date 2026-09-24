@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cdytbvaoxhuif"
-path="res://.godot/imported/torcida_baixo.png-139f58d480a29a5c0be74a953fe0550d.ctex"
+uid="uid://c4l4v8o0jjc44"
+path="res://.godot/imported/never_give_up.png-56bf54126a861850e8f59f3fa7ed5d00.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/arena/torcida_baixo.png"
-dest_files=["res://.godot/imported/torcida_baixo.png-139f58d480a29a5c0be74a953fe0550d.ctex"]
+source_file="res://assets/tema/never_give_up.png"
+dest_files=["res://.godot/imported/never_give_up.png-56bf54126a861850e8f59f3fa7ed5d00.ctex"]
 
 [params]
 

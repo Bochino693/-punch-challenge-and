@@ -24,7 +24,7 @@ const EXTENSOES := ["png", "jpg", "webp", "svg", "wav", "ogg", "mp3", "ttf", "ot
 
 ## Mesma geometria do jogo: quadro lógico 1080x1920.
 const TELA := Vector2(1080.0, 1920.0)
-const FUNDO := Color("19060d")
+const FUNDO := Color("10091d")
 const SELO_CENTRO := Vector2(540.0, 900.0)
 const SELO_TAMANHO := 560.0
 
@@ -251,7 +251,7 @@ func _desenhar() -> void:
 	var pulso := 0.5 + 0.5 * sin(_relogio * 2.2)
 	for i in range(6):
 		var r := SELO_TAMANHO * (0.42 + float(i) * 0.09)
-		t.draw_circle(SELO_CENTRO, r, Color(1.0, 0.1, 0.2, (0.020 + 0.010 * pulso) * (1.0 - float(i) / 6.0) * clampf(_relogio / 0.35, 0.0, 1.0)), true, -1.0, true)
+		t.draw_circle(SELO_CENTRO, r, Color(0.55, 0.2, 1.0, (0.020 + 0.010 * pulso) * (1.0 - float(i) / 6.0) * clampf(_relogio / 0.35, 0.0, 1.0)), true, -1.0, true)
 	if _selo != null:
 		var lado := SELO_TAMANHO
 		t.draw_texture_rect(_selo, Rect2(SELO_CENTRO - Vector2(lado, lado) * 0.5, Vector2(lado, lado)), false)
@@ -263,9 +263,9 @@ func _desenhar() -> void:
 	var topo := SELO_CENTRO.y + SELO_TAMANHO * 0.5 + 150.0
 	var caixa := Rect2(Vector2(540.0 - largura * 0.5, topo), Vector2(largura, altura))
 	_capsula(caixa.grow(3.0), Color(1, 1, 1, 0.08 * aparece))
-	_capsula(caixa, Color("2d0b15", aparece))
+	_capsula(caixa, Color("1d1040", aparece))
 	var cheio := Rect2(caixa.position, Vector2(maxf(altura, largura * _mostrado), altura))
-	_capsula(cheio, Color("ff1934", aparece), Color("ffdc27", aparece))
+	_capsula(cheio, Color("ff26a1", aparece), Color("ffd014", aparece))
 	# O BRILHO FICA DENTRO DA BARRA. O reflexo correndo e a ponta acesa são
 	# cápsulas menores que o trecho cheio e recortadas pelas pontas dele —
 	# nada vaza para fora do trilho.
@@ -283,9 +283,9 @@ func _desenhar() -> void:
 		_capsula(Rect2(p0, topo + 3.0, dentro_fim - p0, altura - 6.0), Color(1.0, 0.95, 0.6, 0.0), Color(1.0, 0.95, 0.6, 0.55 * aparece))
 
 	var pct := "%d%%" % int(round(_mostrado * 100.0))
-	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 74.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 40, Color("ffdc27", aparece))
+	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 74.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 40, Color("ffd014", aparece))
 	var pontos := ".".repeat(1 + int(_relogio * 2.5) % 3)
-	t.draw_string(_fonte, Vector2(caixa.position.x, topo + 124.0), _texto_status() + pontos, HORIZONTAL_ALIGNMENT_CENTER, largura, 28, Color("ead1ca", 0.9 * aparece))
+	t.draw_string(_fonte, Vector2(caixa.position.x, topo + 124.0), _texto_status() + pontos, HORIZONTAL_ALIGNMENT_CENTER, largura, 28, Color("d9d1ff", 0.9 * aparece))
 
 
 ## Retângulo com as pontas totalmente redondas, borda lisa, com gradiente
