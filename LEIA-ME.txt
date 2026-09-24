@@ -1,4 +1,4 @@
-SUPER BOXING (Punch Challenge) - BUILD 84
+SUPER BOXING (Punch Challenge) - BUILD 85
 =========================================
 
 GERAR O APK (um clique so)
@@ -24,9 +24,10 @@ Ou copie o PunchChallenge.apk para a TV Box e instale por la.
 
 PRIMEIRA VEZ NA TV BOX
 ----------------------
-Espere a barra de carregamento terminar. So depois aparecem as janelas:
+As permissoes vem LOGO NO INICIO, antes da barra andar, uma de cada vez:
   1. CAMERA   -> Permitir
   2. ARDUINO  -> marque a caixa e toque OK (so na primeira vez)
+Depois disso a barra carrega e o jogo NAO abre mais nenhuma janela.
 A camera abre sozinha e se religa se parar.
 
 SE A ABERTURA TRAVAR

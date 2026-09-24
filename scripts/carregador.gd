@@ -93,9 +93,9 @@ var _barra: ColorRect = null
 var _barra_mat: ShaderMaterial = null
 const SUMIR_SEGUNDOS := 0.45
 
-enum Fase { CARREGANDO, MONTANDO, AQUECENDO, SUMINDO, PRONTO }
+enum Fase { PERMISSOES, CARREGANDO, MONTANDO, AQUECENDO, SUMINDO, PRONTO }
 
-var fase := Fase.CARREGANDO
+var fase := Fase.PERMISSOES
 var _pendentes: Array[String] = []
 var _guardados: Array[Resource] = []
 var _total := 0
@@ -145,11 +145,123 @@ func _ready() -> void:
 	_barra.size = Vector2(BARRA_LARGURA, BARRA_ALTURA)
 	_barra.position = Vector2(540.0 - BARRA_LARGURA * 0.5, _topo_da_barra())
 	_tela.add_child(_barra)
+	if OS.get_name() == "Android":
+		Diario.marca("PERMISSOES: inicio")
+	else:
+		_iniciar_carga()
 
+
+func _iniciar_carga() -> void:
+	_mudar(Fase.CARREGANDO)
 	_pedir(CENA_DO_JOGO)
 	for pasta in PASTAS:
 		_listar(pasta)
 	_total = _pendentes.size()
+
+
+# ------------------------------------------------------------ permissões
+## AS PERMISSÕES VÊM PRIMEIRO, ANTES DE CARREGAR QUALQUER COISA, uma de
+## cada vez: a janela da CÂMERA, espera a resposta; a janela do ARDUINO,
+## espera a resposta; só então o jogo carrega. Nesse momento só existe a
+## tela do carregador — nada pesado pausado no meio, nada aberto à toa — e
+## o jogo, depois, já encontra tudo autorizado: nenhuma janela no meio da
+## abertura nem da partida.
+enum Perm { CAMERA, ARDUINO, FIM }
+var _perm := Perm.CAMERA
+var _perm_pedido := false
+var _perm_t0 := 0.0
+var _saiu_foco := false
+var _voltou_foco := false
+var _perm_texto := "VERIFICANDO PERMISSÕES"
+
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED:
+			_saiu_foco = true
+		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED:
+			if _saiu_foco:
+				_voltou_foco = true
+
+func _proxima_permissao() -> void:
+	_perm = (int(_perm) + 1) as Perm
+	_perm_pedido = false
+	_perm_t0 = _relogio
+	_saiu_foco = false
+	_voltou_foco = false
+
+## A janela foi respondida? (o jogo saiu de foco e voltou), ou nem abriu.
+func _respondida() -> bool:
+	var espera := _relogio - _perm_t0
+	if _voltou_foco:
+		return espera > 0.6
+	if not _saiu_foco and espera > 3.0:
+		return true   # nenhuma janela apareceu (já decidida antes)
+	return espera > 45.0
+
+func _passo_das_permissoes() -> void:
+	match _perm:
+		Perm.CAMERA:
+			if OS.get_granted_permissions().has("android.permission.CAMERA"):
+				Diario.marca("PERMISSOES: camera ok")
+				_proxima_permissao()
+				return
+			if not _perm_pedido:
+				_perm_pedido = true
+				_perm_t0 = _relogio
+				_saiu_foco = false
+				_voltou_foco = false
+				_perm_texto = "AUTORIZE A CÂMERA NA JANELA"
+				Diario.marca("PERMISSOES: pedindo camera")
+				OS.request_permission("CAMERA")
+				return
+			if _respondida():
+				Diario.marca("PERMISSOES: camera respondida (%s)" % (
+					"ok" if OS.get_granted_permissions().has("android.permission.CAMERA") else "sem permissao"))
+				_proxima_permissao()
+		Perm.ARDUINO:
+			_passo_do_arduino()
+		Perm.FIM:
+			Diario.marca("PERMISSOES: fim")
+			_perm = Perm.FIM
+			_iniciar_carga()
+
+func _passo_do_arduino() -> void:
+	if not Engine.has_singleton("PunchUsbSerial"):
+		_proxima_permissao()
+		return
+	var plugin = Engine.get_singleton("PunchUsbSerial")
+	if _perm_pedido:
+		if _respondida():
+			Diario.marca("PERMISSOES: arduino respondido")
+			_proxima_permissao()
+		return
+	# A lista pode vir vazia no primeiro pedido (o plugin novo a monta em
+	# segundo plano): tenta por 3 s; sem Arduino ligado, segue.
+	var lista := str(plugin.call("listPorts")).strip_edges()
+	if lista.is_empty():
+		_perm_texto = "PROCURANDO O ARDUINO"
+		if _relogio - _perm_t0 > 3.0:
+			Diario.marca("PERMISSOES: nenhum arduino na USB")
+			_proxima_permissao()
+		return
+	var porta := lista.split("\n")[0].strip_edges()
+	Diario.marca("PERMISSOES: arduino %s" % porta)
+	if bool(plugin.call("openPort", porta, GameDef.SERIAL_BAUD)):
+		plugin.call("closePort")
+		Diario.marca("PERMISSOES: arduino ok")
+		_proxima_permissao()
+		return
+	var erro := str(plugin.call("getLastError")).to_lower()
+	if "autoriz" in erro:
+		_perm_pedido = true
+		_perm_t0 = _relogio
+		_saiu_foco = false
+		_voltou_foco = false
+		_perm_texto = "ARDUINO: MARQUE A CAIXA E TOQUE OK"
+		Diario.marca("PERMISSOES: pedindo arduino")
+		return
+	Diario.marca("PERMISSOES: arduino erro (%s)" % erro)
+	_proxima_permissao()
 
 
 func _configurar_janela() -> void:
@@ -190,6 +302,8 @@ func _process(delta: float) -> void:
 	_relogio += delta
 	_fase_tempo += delta
 	match fase:
+		Fase.PERMISSOES:
+			_passo_das_permissoes()
 		Fase.CARREGANDO:
 			_acompanhar_carga()
 		Fase.MONTANDO:
@@ -325,6 +439,8 @@ func _camada_alfa(a: float) -> void:
 
 func _texto_status() -> String:
 	match fase:
+		Fase.PERMISSOES:
+			return _perm_texto
 		Fase.CARREGANDO:
 			if _progresso < 0.30:
 				return "CARREGANDO SONS E IMAGENS"
