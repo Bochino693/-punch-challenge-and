@@ -957,9 +957,10 @@ func _montar_arena() -> void:
 	arena.qualidade = desempenho.qualidade
 	if arena.instalar():
 		arena.preparar()
-		# Compila shaders e sobe as texturas agora, fora da vista, e não
-		# no primeiro soco.
-		arena.aquecer()
+		# Por baixo do carregador o aquecimento é o ENSAIO, em etapas (ver
+		# `_passo_do_ensaio`). Aberto direto no editor, aquece de uma vez.
+		if not entrada_segurada:
+			arena.aquecer()
 	else:
 		push_warning("Arena: o lutador subiu sem todas as poses.")
 
@@ -1082,9 +1083,7 @@ func _process(delta: float) -> void:
 	hitstop_left = maxf(0.0, hitstop_left - delta)
 	_contar_ok_segurado(delta)
 	if _ensaio >= 0:
-		_ensaio += 1
-		if _ensaio > ENSAIO_QUADROS:
-			_encerrar_ensaio()
+		_passo_do_ensaio()
 	# A gravação pendente sai assim que a anterior termina, e nunca no
 	# quadro em que ela foi pedida. Ver `SettingsStore.save_data_async`.
 	SettingsStore.bombear()
@@ -1966,6 +1965,10 @@ func rodada_liberada() -> bool:
 ## O que dizer a quem apertou START e a máquina não começou.
 func motivo_da_recusa() -> String:
 	if not _arduino_conectado():
+		# A janela do Android está esperando: diz o que fazer nela, uma vez
+		# só — marcada "Usar por padrão", nunca mais é pedida.
+		if link != null and link.aguardando_permissao():
+			return "NA JANELA DO ANDROID: MARQUE USAR POR PADRÃO E OK"
 		return "AGUARDE — CONECTANDO O ARDUINO"
 	if not camera_enabled:
 		return "CÂMERA DESLIGADA"
@@ -2335,7 +2338,14 @@ func _disparar_veredito() -> void:
 ## abertura), e dispara uma vez cada efeito de partícula. Tudo o que é
 ## trocado para o ensaio é guardado antes e devolvido depois, no mesmo
 ## quadro — o estado real do jogo nunca muda.
-const ENSAIO_QUADROS := 30
+## Os quadros do ensaio. Cada TELA NOVA entra num quadro par e o quadro
+## ímpar seguinte só a repete (já compilada, custa pouco): é o respiro em
+## que o carregador anima a barra. Depois das telas 2D vêm as etapas da
+## arena 3D, três quadros cada.
+const ENSAIO_TELAS := 27
+const ENSAIO_QUADROS_2D := ENSAIO_TELAS * 2 + 2
+const ENSAIO_QUADROS_POR_ETAPA := 3
+const ENSAIO_QUADROS := ENSAIO_QUADROS_2D + Arena3D.ETAPAS_DE_AQUECIMENTO * ENSAIO_QUADROS_POR_ETAPA + 2
 const ENSAIO_NOTAS := [900, 2600, 5100, 7050, 8420, 9310, 9820, 9999]
 const ENSAIO_POSICOES := [1, 2, 3, 6, 11, 17, 20, 0]
 const ENSAIO_SALVA := [
@@ -2347,11 +2357,37 @@ const ENSAIO_SALVA := [
 ]
 var _ensaio := -1
 var _ensaio_ranking: Array[Dictionary] = []
+var _ensaio_feito := false
+
+## Avança o ensaio um quadro e dispara as etapas da arena na hora certa.
+func _passo_do_ensaio() -> void:
+	_ensaio += 1
+	var q := _ensaio - ENSAIO_QUADROS_2D
+	if q >= 0 and q % ENSAIO_QUADROS_POR_ETAPA == 0 and arena != null:
+		var etapa := q / ENSAIO_QUADROS_POR_ETAPA
+		if etapa <= Arena3D.ETAPAS_DE_AQUECIMENTO:
+			arena.etapa_de_aquecimento(etapa)
+	if _ensaio > ENSAIO_QUADROS:
+		_encerrar_ensaio()
+
+## Para o carregador: quanto do aquecimento já foi (0 a 1) e se acabou.
+func aquecimento_progresso() -> float:
+	if _ensaio_feito:
+		return 1.0
+	if _ensaio < 0:
+		return 0.0
+	return clampf(float(_ensaio) / float(ENSAIO_QUADROS), 0.0, 1.0)
+
+func aquecimento_pronto() -> bool:
+	return _ensaio_feito or (_ensaio < 0 and not entrada_segurada)
 
 func _encerrar_ensaio() -> void:
 	if _ensaio < 0:
 		return
 	_ensaio = -1
+	_ensaio_feito = true
+	if arena != null:
+		arena.etapa_de_aquecimento(Arena3D.ETAPAS_DE_AQUECIMENTO)
 	fx.limpar()
 	queue_redraw()
 
@@ -2360,7 +2396,9 @@ func _draw_ensaio() -> void:
 	for nome in ENSAIO_SALVA:
 		var valor = get(nome)
 		guardado[nome] = valor.duplicate() if (valor is Array or valor is Dictionary) else valor
-	var i := _ensaio
+	# uma tela nova a cada DOIS quadros; depois das telas, a abertura leve
+	# os dois primeiros quadros são o da montagem: só a abertura, leve
+	var i := mini(maxi(_ensaio - 2, 0) / 2, ENSAIO_TELAS) if _ensaio >= 2 else ENSAIO_TELAS
 	if _ensaio_ranking.is_empty():
 		var lista: Array[Dictionary] = []
 		for k in 14:
@@ -2389,7 +2427,7 @@ func _draw_ensaio() -> void:
 		_draw_partida()
 		_draw_pancada()
 		_draw_clarao()
-		if i == 0:
+		if i == 1 and _ensaio % 2 == 1:
 			var nivel := ScoreTier.de(9999)
 			ImpactDirector.golpe(fx, _alvo(), nivel, CORES_FESTA)
 			ImpactDirector.festa(fx, _alvo(), nivel, CORES_FESTA)
@@ -2402,7 +2440,7 @@ func _draw_ensaio() -> void:
 		ranking_started_at = 0.0
 		verdict_time = [0.3, 1.0, 1.8, 2.3, 2.7, 3.2, 4.5, 2.0][i - 8]
 		_draw_ranking_reveal()
-		if i == 8:
+		if i == 9 and _ensaio % 2 == 1:
 			fx.chuva_de_confete(1080.0, 30, CORES_FESTA, 1.0)
 			fx.confete(Vector2(540.0, 1880.0), 28, CORES_FESTA, 900.0)
 			fx.fogos(Vector2(540.0, 700.0), CORES_FESTA)

@@ -28,9 +28,48 @@ const FUNDO := Color("10091d")
 const SELO_CENTRO := Vector2(540.0, 900.0)
 const SELO_TAMANHO := 560.0
 
-## Quadros e tempo mínimos com o jogo já montado por baixo, aquecendo.
-const AQUECER_QUADROS := 60
-const AQUECER_SEGUNDOS := 1.3
+## Quadros e tempo MÍNIMOS com o jogo já montado por baixo, aquecendo. O
+## fim de verdade é o jogo dizer que o ensaio acabou
+## (`aquecimento_pronto`): numa TV Box ele leva o tempo que levar, e a
+## barra acompanha etapa por etapa em vez de parar num número.
+const AQUECER_QUADROS := 20
+const AQUECER_SEGUNDOS := 0.6
+## Teto de segurança: se por algum motivo o jogo não responder, a tela
+## some mesmo assim (melhor jogo um pouco engasgado que tela parada).
+const AQUECER_TETO_SEGUNDOS := 45.0
+
+## A BARRA É UM SHADER. Faixas diagonais e um brilho varrendo o TRILHO
+## INTEIRO (o fundo da barra, e não só a parte cheia), movidos pelo
+## relógio da GPU: a barra continua viva mesmo quando o número demora a
+## subir — barra parada é o que dá a impressão de travamento.
+const SHADER_BARRA := """
+shader_type canvas_item;
+uniform float progresso = 0.0;
+uniform vec2 tamanho = vec2(640.0, 20.0);
+uniform vec4 trilho : source_color = vec4(0.11, 0.06, 0.25, 1.0);
+uniform vec4 cor_a : source_color = vec4(1.0, 0.15, 0.63, 1.0);
+uniform vec4 cor_b : source_color = vec4(1.0, 0.82, 0.08, 1.0);
+void fragment() {
+	vec2 p = UV * tamanho;
+	float r = tamanho.y * 0.5;
+	vec2 c = vec2(clamp(p.x, r, tamanho.x - r), r);
+	float d = length(p - c) - r;
+	float dentro = 1.0 - smoothstep(-1.0, 0.6, d);
+	float listra = step(0.5, fract((p.x - p.y * 1.4) / 24.0 - TIME * 1.1));
+	float varre = fract(TIME * 0.42) * 1.5 - 0.25;
+	float brilho = exp(-pow((UV.x - varre) / 0.07, 2.0));
+	vec3 fundo = trilho.rgb * (0.80 + 0.35 * listra) + vec3(0.55, 0.40, 1.0) * brilho * 0.55;
+	float cheio = step(p.x, max(progresso * tamanho.x, tamanho.y));
+	vec3 fill = mix(cor_a.rgb, cor_b.rgb, UV.x) * (0.88 + 0.18 * listra) + vec3(1.0) * brilho * 0.35;
+	float borda = smoothstep(-2.5, -1.0, d) * (1.0 - smoothstep(-1.0, 0.6, d));
+	vec3 cor = mix(fundo, fill, cheio) + vec3(0.6, 0.5, 1.0) * borda * 0.35;
+	COLOR = vec4(cor, dentro * COLOR.a);
+}
+"""
+const BARRA_LARGURA := 640.0
+const BARRA_ALTURA := 26.0
+var _barra: ColorRect = null
+var _barra_mat: ShaderMaterial = null
 const SUMIR_SEGUNDOS := 0.45
 
 enum Fase { CARREGANDO, MONTANDO, AQUECENDO, SUMINDO, PRONTO }
@@ -71,6 +110,18 @@ func _ready() -> void:
 		_tela.position = Vector2(0.0, 1080.0)
 	_tela.draw.connect(_desenhar)
 	_camada.add_child(_tela)
+	_barra_mat = ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = SHADER_BARRA
+	_barra_mat.shader = sh
+	_barra_mat.set_shader_parameter("tamanho", Vector2(BARRA_LARGURA, BARRA_ALTURA))
+	_barra = ColorRect.new()
+	_barra.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_barra.material = _barra_mat
+	_barra.color = Color(1, 1, 1, 1)
+	_barra.size = Vector2(BARRA_LARGURA, BARRA_ALTURA)
+	_barra.position = Vector2(540.0 - BARRA_LARGURA * 0.5, _topo_da_barra())
+	_tela.add_child(_barra)
 
 	_pedir(CENA_DO_JOGO)
 	for pasta in PASTAS:
@@ -125,9 +176,17 @@ func _process(delta: float) -> void:
 				_montar_jogo()
 		Fase.AQUECENDO:
 			_quadros_aquecendo += 1
-			var parte := minf(float(_quadros_aquecendo) / AQUECER_QUADROS, _fase_tempo / AQUECER_SEGUNDOS)
+			var minimo := minf(float(_quadros_aquecendo) / AQUECER_QUADROS, _fase_tempo / AQUECER_SEGUNDOS)
+			var parte := minimo
+			var pronto := minimo >= 1.0
+			if _jogo != null and _jogo.has_method("aquecimento_progresso"):
+				parte = minf(minimo, float(_jogo.aquecimento_progresso()))
+				pronto = pronto and bool(_jogo.aquecimento_pronto())
+			if _fase_tempo > AQUECER_TETO_SEGUNDOS:
+				pronto = true
+				parte = 1.0
 			_progresso = lerpf(0.9, 1.0, clampf(parte, 0.0, 1.0))
-			if parte >= 1.0 and _mostrado > 0.995:
+			if pronto and _mostrado > 0.995:
 				_mudar(Fase.SUMINDO)
 				if _jogo != null and _jogo.has_method("soltar_entrada"):
 					_jogo.soltar_entrada()
@@ -138,8 +197,13 @@ func _process(delta: float) -> void:
 				_camada.queue_free()
 				set_process(false)
 				return
-	# A barra corre atrás do progresso real, sem saltos.
-	_mostrado = move_toward(_mostrado, _progresso, delta * maxf(0.35, (_progresso - _mostrado) * 5.0))
+	# A barra corre atrás do progresso real, sem saltos. O passo por quadro
+	# tem teto: depois de um quadro demorado ela não pula, continua
+	# andando — e o brilho do shader nunca para.
+	_mostrado = move_toward(_mostrado, _progresso, minf(delta, 0.05) * maxf(0.35, (_progresso - _mostrado) * 5.0))
+	if _barra_mat != null:
+		_barra_mat.set_shader_parameter("progresso", _mostrado)
+		_barra.modulate.a = clampf(_relogio / 0.35, 0.0, 1.0)
 	_tela.queue_redraw()
 
 
@@ -220,6 +284,10 @@ func _tela_vertical() -> SubViewport:
 	return vp
 
 
+func _topo_da_barra() -> float:
+	return SELO_CENTRO.y + SELO_TAMANHO * 0.5 + 150.0
+
+
 func _mudar(nova: Fase) -> void:
 	fase = nova
 	_fase_tempo = 0.0
@@ -256,32 +324,11 @@ func _desenhar() -> void:
 		var lado := SELO_TAMANHO
 		t.draw_texture_rect(_selo, Rect2(SELO_CENTRO - Vector2(lado, lado) * 0.5, Vector2(lado, lado)), false)
 
-	# Barra de progresso, fina e com cantos redondos.
+	# A BARRA é o nó com shader (`_barra`); aqui só o número e o texto.
 	var aparece := clampf(_relogio / 0.35, 0.0, 1.0)
-	var largura := 620.0
-	var altura := 14.0
-	var topo := SELO_CENTRO.y + SELO_TAMANHO * 0.5 + 150.0
-	var caixa := Rect2(Vector2(540.0 - largura * 0.5, topo), Vector2(largura, altura))
-	_capsula(caixa.grow(3.0), Color(1, 1, 1, 0.08 * aparece))
-	_capsula(caixa, Color("1d1040", aparece))
-	var cheio := Rect2(caixa.position, Vector2(maxf(altura, largura * _mostrado), altura))
-	_capsula(cheio, Color("ff26a1", aparece), Color("ffd014", aparece))
-	# O BRILHO FICA DENTRO DA BARRA. O reflexo correndo e a ponta acesa são
-	# cápsulas menores que o trecho cheio e recortadas pelas pontas dele —
-	# nada vaza para fora do trilho.
-	var raio_cheio := altura * 0.5
-	var dentro_ini := cheio.position.x + raio_cheio * 0.5
-	var dentro_fim := cheio.end.x - raio_cheio * 0.5
-	var brilho_x := fmod(_relogio * 420.0, cheio.size.x + 160.0) - 80.0
-	var b0 := maxf(cheio.position.x + brilho_x - 34.0, dentro_ini)
-	var b1 := minf(cheio.position.x + brilho_x + 34.0, dentro_fim)
-	if b1 - b0 > 6.0:
-		_capsula(Rect2(b0, topo + 3.0, b1 - b0, altura - 6.0), Color(1, 1, 1, 0.30 * aparece))
-	# a ponta acesa, também por dentro
-	var p0 := maxf(dentro_fim - 40.0, dentro_ini)
-	if dentro_fim - p0 > 6.0:
-		_capsula(Rect2(p0, topo + 3.0, dentro_fim - p0, altura - 6.0), Color(1.0, 0.95, 0.6, 0.0), Color(1.0, 0.95, 0.6, 0.55 * aparece))
-
+	var largura := BARRA_LARGURA
+	var topo := _topo_da_barra()
+	var caixa := Rect2(Vector2(540.0 - largura * 0.5, topo), Vector2(largura, BARRA_ALTURA))
 	var pct := "%d%%" % int(round(_mostrado * 100.0))
 	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 74.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 40, Color("ffd014", aparece))
 	var pontos := ".".repeat(1 + int(_relogio * 2.5) % 3)
