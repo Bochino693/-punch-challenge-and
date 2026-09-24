@@ -24,19 +24,16 @@ var _estado := FECHADA
 var _porta := ""
 var _porta_pedida := ""
 var _portas := PackedStringArray()
-var _versao := 1
 
 func _init() -> void:
 	if Engine.has_singleton("PunchUsbSerial"):
 		_plugin = Engine.get_singleton("PunchUsbSerial")
 		_motivo = ""
-		# `has_method` num plugin Android responde "não" sempre; quem diz o
-		# que o plugin sabe fazer é a versão dele. A 2 abre a porta e lista
-		# a USB numa thread própria e entrega tudo em `pollSerial`; um
-		# plugin antigo (sem a versão) fica no caminho de antes.
-		var versao = _plugin.call("getApiVersion")
-		_versao = int(versao) if versao != null else 1
-		_assincrono = _versao >= 2
+		# SÓ AS CHAMADAS QUE TODA VERSÃO DO PLUGIN TEM. Perguntar por uma
+		# função que o plugin do APK não tem é erro de script no Android;
+		# o caminho síncrono funciona com o plugin antigo e com o novo (o
+		# novo só faz o trabalho lento em segundo plano por dentro).
+		_assincrono = false
 
 func nome_do_caminho() -> String:
 	return CAMINHO_ANDROID_USB
@@ -146,14 +143,6 @@ func _mudar_estado(novo: int) -> void:
 func encerrar() -> void:
 	close_port()
 
-## A janela de permissão USB do Android está na frente do jogo?
-func janela_aberta() -> bool:
-	return _versao >= 2 and _plugin != null and bool(_plugin.call("usbPermissionPending"))
-
 func soltar_para_sair() -> void:
-	if _plugin == null:
-		return
-	if _versao >= 2:
-		_plugin.call("shutdown")
-	else:
+	if _plugin != null:
 		_plugin.call("closePort")

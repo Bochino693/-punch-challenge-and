@@ -894,6 +894,7 @@ func _ready() -> void:
 	# menos se espera um travamento, logo na primeira rodada do dia.
 	_prewarm_fotos_do_ranking()
 	camera_service = CameraService.new()
+	camera_service.adormecida = entrada_segurada
 	camera_service.enabled = camera_enabled
 	camera_service.selected_index = camera_index
 	camera_service.mirrored = camera_mirrored
@@ -911,11 +912,15 @@ func _ready() -> void:
 		_converteu_esquema = false
 		_salvar()
 		_show_notice("CONFIGURAÇÃO DE PONTUAÇÃO ATUALIZADA")
-	_montar_arena()
+	# A ARENA (lutador 3D) É MONTADA NO QUADRO SEGUINTE quando há
+	# carregador: aqui ela pesava no mesmo quadro em que a cena do jogo é
+	# criada — era o congelamento nos 86%.
 	# O ENSAIO GERAL só acontece por baixo do carregador (que segura a
 	# entrada). Aberto direto no editor, ninguém cobre a tela.
 	if entrada_segurada:
 		_ensaio = 0
+	else:
+		_montar_arena()
 	_iniciar_serial()
 	_entrar_em_abertura()
 	# A música entra baixa por baixo da entrada e sobe na virada para a
@@ -1026,6 +1031,10 @@ func _notification(what: int) -> void:
 			Porteiro.foco(false)
 		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED:
 			Porteiro.foco(true)
+			# Voltou de uma janela do Android (ou a TV Box acordou): a
+			# câmera confere na hora se está viva e se já foi autorizada.
+			if camera_service != null:
+				camera_service.ao_voltar()
 		NOTIFICATION_WM_GO_BACK_REQUEST:
 			# Na Central o VOLTAR fecha a Central (o teclado já cuida).
 			if central_aberta or calib_ativo:
@@ -1316,6 +1325,10 @@ func _ritmo_da_camera() -> int:
 func soltar_entrada() -> void:
 	_encerrar_ensaio()
 	entrada_segurada = false
+	# SÓ AGORA câmera e Arduino começam (e as janelas de permissão, se
+	# forem necessárias): o carregamento já terminou.
+	if camera_service != null:
+		camera_service.acordar()
 	intro_time = 0.0
 	ritmo = Ritmo.new()
 
@@ -2613,6 +2626,8 @@ var _ensaio_feito := false
 ## Avança o ensaio um quadro e dispara as etapas da arena na hora certa.
 func _passo_do_ensaio() -> void:
 	_ensaio += 1
+	if _ensaio == 1:
+		_montar_arena()
 	var q := _ensaio - ENSAIO_QUADROS_2D
 	if q >= 0 and q % ENSAIO_QUADROS_POR_ETAPA == 0 and arena != null:
 		var etapa := q / ENSAIO_QUADROS_POR_ETAPA
@@ -2633,6 +2648,8 @@ func aquecimento_pronto() -> bool:
 	return _ensaio_feito or (_ensaio < 0 and not entrada_segurada)
 
 func _encerrar_ensaio() -> void:
+	if arena != null and arena.lutador == null:
+		_montar_arena()
 	if _ensaio < 0:
 		return
 	_ensaio = -1
@@ -3568,8 +3585,12 @@ func _poll_serial(_delta: float) -> void:
 	if central_aberta and not placa_respondeu:
 		_pedir_a_lista()
 	if not link.is_open():
-		# Com uma janela do Android na frente do jogo, nada de USB.
-		if animation_time >= proxima_tentativa and _hora_de_procurar() and Porteiro.livre():
+		# Nada de USB durante o carregamento, com uma janela do Android na
+		# frente, ou antes de a janela da câmera ter sido respondida (uma
+		# janela de cada vez).
+		var pode := not entrada_segurada and Porteiro.livre() \
+			and (camera_service == null or camera_service.permissao_resolvida())
+		if animation_time >= proxima_tentativa and _hora_de_procurar() and pode:
 			_tentar_conectar()
 		return
 	if not _porta_confirmada and animation_time - _porta_pedida_em > ESPERA_DA_CONFIRMACAO:
