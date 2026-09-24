@@ -271,6 +271,56 @@ def casca(v, f, n, mascara_v, afasta, a, grau, alisa=6):
     return vv, novo[ff], usados, borda
 
 
+def fechar_cavalo(cv, usados, pos):
+    """O CALÇÃO CAI RETO ENTRE AS PERNAS, como cetim de verdade.
+
+    A casca seguia o corpo até dentro do vão entre as coxas: na frente do
+    calção ficava um buraco fundo e escuro bem no cavalo (e a câmera do
+    soco na tela ia justo nele). Aqui, fatia por fatia de altura, a frente
+    e as costas do calção são puxadas até o "contorno de tecido esticado"
+    (a envoltória convexa da fatia): o pano passa reto de uma coxa à
+    outra, sem entrar no vão.
+    """
+    I = NOMES.index
+    uso = np.zeros(len(cv), bool)
+    uso[usados] = True
+    meio = uso & (np.abs(cv[:, 0]) < 0.015)
+    if not meio.any():
+        return
+    apice = float(cv[meio, 1].min())
+    topo = float(pos[I("Hips")][1]) + 0.03
+    faixa = np.where(uso & (cv[:, 1] > apice - 0.012) & (cv[:, 1] < topo))[0]
+    passo = 0.008
+
+    def cruz(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    for sinal in (1.0, -1.0):
+        for yb in np.arange(apice - 0.012, topo, passo):
+            sel = faixa[(cv[faixa, 1] >= yb) & (cv[faixa, 1] < yb + passo)]
+            if len(sel) < 4:
+                continue
+            x = cv[sel, 0]
+            z = cv[sel, 2] * sinal
+            centro = float(np.median(cv[sel, 2])) * sinal
+            ordem = np.argsort(x)
+            casco = []
+            for k in ordem:
+                ponto = (x[k], z[k])
+                while len(casco) >= 2 and cruz(casco[-2], casco[-1], ponto) >= 0:
+                    casco.pop()
+                casco.append(ponto)
+            h = np.array(casco)
+            zh = np.interp(x, h[:, 0], h[:, 1]) - 0.003
+            # Só perto do meio, e só na metade da frente (ou de trás):
+            # as laterais das coxas continuam seguindo o corpo.
+            peso_x = np.clip((0.11 - np.abs(x)) / 0.05, 0.0, 1.0)
+            frente = np.clip((z - centro) / max(float(zh.max() - centro), 1e-4) * 2.0, 0.0, 1.0)
+            peso = peso_x * frente
+            novo = np.maximum(z, z + (zh - z) * peso)
+            cv[sel, 2] = novo * sinal
+
+
 def friso(cv, ci, nrm, jj, ww, pos, r, v0):
     """Faixa da bainha: um anel de quadriláteros subindo da borda da perna."""
     from collections import Counter
@@ -1110,6 +1160,7 @@ def construir(pintar=True):
         cv[perna] += np.outer(0.47 - t, ab)
     cintura = cb & (v[:, 1] > r["cintura"] - 0.05)
     cv[cintura, 1] = r["cintura"] + 0.004
+    fechar_cavalo(cv, usados, pos)
     cv = cv[usados]
     for nome, vv, ii, us in (("Calcao", cv, ci, usados),):
         tri_mask = np.isin(f, us).all(1) & r["calcao"][f].all(1)
