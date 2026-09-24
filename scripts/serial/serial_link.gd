@@ -64,3 +64,7 @@ func poll() -> void:
 
 func encerrar() -> void:
 	pass
+
+## Verdade enquanto o Android espera a pessoa autorizar o USB da placa.
+func aguardando_permissao() -> bool:
+	return false

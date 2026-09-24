@@ -68,6 +68,7 @@ func open_port(port: String, baud: int = GameDef.SERIAL_BAUD) -> bool:
 	if not bool(_plugin.call("openPort", port, baud)):
 		_motivo = str(_plugin.call("getLastError"))
 		return false
+	_motivo = ""
 	if _assincrono:
 		# Pedido aceito; o "opened" sai do `poll()` quando a porta abrir.
 		_estado = ABRINDO
@@ -76,6 +77,9 @@ func open_port(port: String, baud: int = GameDef.SERIAL_BAUD) -> bool:
 		_porta = port
 		opened.emit(port)
 	return true
+
+func aguardando_permissao() -> bool:
+	return "autoriz" in _motivo.to_lower()
 
 func close_port() -> void:
 	if _plugin == null:

@@ -4,6 +4,10 @@
 	<uses-feature android:name="android.hardware.camera.any" android:required="false"/>
 	<uses-feature android:name="android.hardware.camera.external" android:required="false"/>
 	<uses-permission android:name="android.permission.CAMERA"/>
+	<!-- Não grava áudio: sem esta permissão a janela USB do Android esconde
+	     "Usar por padrão" para a webcam (que tem microfone), e a permissão
+	     USB dela teria de ser dada de novo a cada vez que a TV Box liga. -->
+	<uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
     <application android:resizeableActivity="true" android:hardwareAccelerated="true">
         <!--

@@ -301,8 +301,15 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     fun requestUsbCameraAccess(): String {
         val host = activity ?: return "TELA ANDROID AINDA NÃO DISPONÍVEL"
         host.runOnUiThread {
-            if (host.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                host.requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
+            // CAMERA e MICROFONE juntos, uma vez só. O microfone não é usado:
+            // é que a janela USB do Android ESCONDE a caixa "Usar por padrão"
+            // para aparelhos com áudio (toda webcam tem microfone) quando o
+            // app não tem RECORD_AUDIO. Sem a caixa, a webcam seria pedida de
+            // novo a cada vez que a TV Box liga.
+            val faltam = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+                .filter { host.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+            if (faltam.isNotEmpty()) {
+                host.requestPermissions(faltam.toTypedArray(), CAMERA_PERMISSION_REQUEST)
             }
             // Com a câmera do sistema disponível, não se pede a USB da webcam:
             // quem fala com ela é o próprio Android.
@@ -325,7 +332,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                         pending,
                         PendingIntent.getBroadcast(host, 10000 + pending.deviceId, intent, flags)
                     )
-                    cameraStatus = "AUTORIZE A WEBCAM USB UMA VEZ"
+                    cameraStatus = "WEBCAM: MARQUE USAR POR PADRÃO E TOQUE OK"
                 } else {
                     cameraStatus = "AGUARDANDO AUTORIZAÇÃO DA WEBCAM USB"
                 }
@@ -907,9 +914,9 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                         driver.device,
                         PendingIntent.getBroadcast(host, driver.device.deviceId, intent, flags)
                     )
-                    return fail("autorize o Arduino uma vez e aguarde a reconexao")
+                    return fail("autorize o Arduino: marque USAR POR PADRAO e toque OK (so na 1a vez)")
                 }
-                return fail("aguardando autorizacao USB do Arduino")
+                return fail("autorize o Arduino: marque USAR POR PADRAO e toque OK (so na 1a vez)")
             }
             synchronized(lock) { serialPermissionRequested.remove(driver.device.deviceId) }
             val connection = usbManager.openDevice(driver.device)

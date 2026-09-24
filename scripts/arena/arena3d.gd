@@ -97,6 +97,7 @@ var _rim_quente: OmniLight3D = null
 var _rim_frio: OmniLight3D = null
 var _mat_fundo: ShaderMaterial = null
 var _mat_torcida: ShaderMaterial = null
+var _gente: MeshInstance3D = null
 ## A torcida: quanto ela está agitada (0..1) e para onde vai.
 var _agito := 0.0
 var _agito_alvo := 0.0
@@ -243,7 +244,7 @@ func _montar_fundo() -> void:
 		_mat_torcida.set_shader_parameter("cima", load(TEX_TORCIDA_CIMA))
 		var gente := QuadMesh.new()
 		gente.size = Vector2(10.0, 2.5)
-		_peca(gente, _mat_torcida, Vector3(0.0, 0.55, -4.3))
+		_gente = _peca(gente, _mat_torcida, Vector3(0.0, 0.55, -4.3))
 	# O chão do ginásio entre o ringue e a plateia: escuro, só para o
 	# tablado parecer suspenso.
 	var chao := PlaneMesh.new()
@@ -508,7 +509,7 @@ func ligar(ativa: bool) -> void:
 	_ativa = ativa
 	if ativa:
 		_aplicar_tamanho()
-	elif _aquecendo <= 0:
+	elif _aquecendo <= 0 and _etapa < 0:
 		render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 
@@ -526,6 +527,63 @@ func aquecer(quadros := 24) -> void:
 		_impacto.restart()
 	if _poeira != null:
 		_poeira.restart()
+
+
+## O AQUECIMENTO EM ETAPAS, UMA COISA NOVA POR VEZ.
+##
+## Renderizar tudo de uma vez no primeiro quadro (mundo, lutador com
+## clarão e expressões, partículas) compila dezenas de shaders e sobe
+## todas as texturas no MESMO quadro — numa TV Box isso é a tela parada
+## por vários segundos, e era o "trava em 87%". Em etapas, cada quadro só
+## traz uma novidade, e o carregador continua animando entre elas.
+const ETAPAS_DE_AQUECIMENTO := 7
+var _etapa := -1
+
+func _enfeites_visiveis(sim: bool) -> void:
+	if _gente != null:
+		_gente.visible = sim
+	if _flashes != null:
+		_flashes.visible = sim
+	for f in _fachos:
+		f.visible = sim
+
+func etapa_de_aquecimento(n: int) -> void:
+	_etapa = n
+	match n:
+		0:
+			# o ringue e o fundo, sem lutador, torcida nem luzes
+			if lutador != null:
+				lutador.visible = false
+			_enfeites_visiveis(false)
+			render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		1:
+			# a torcida (shader próprio), os fachos e os flashes
+			_enfeites_visiveis(true)
+		2:
+			if lutador != null:
+				lutador.visible = true
+				lutador.atualizar(0.0)
+		3:
+			# o clarão do golpe (a passada aditiva por cima do corpo)
+			if lutador != null:
+				lutador.clarao(1.0)
+				lutador.atualizar(0.0)
+		4:
+			# as expressões do rosto
+			if lutador != null:
+				lutador.mostrar_pose(&"celebra")
+		5:
+			if _impacto != null:
+				_impacto.restart()
+			if _poeira != null:
+				_poeira.restart()
+		_:
+			_etapa = -1
+			_enfeites_visiveis(true)
+			preparar()
+			if lutador != null:
+				lutador.visible = true
+			render_target_update_mode = SubViewport.UPDATE_ONCE if _ativa else SubViewport.UPDATE_DISABLED
 
 
 func golpe(forca: float, derruba := false, pontos := -1, ultimo := false) -> Dictionary:
@@ -613,6 +671,9 @@ func na_lona() -> bool:
 
 
 func avancar(delta: float) -> void:
+	if _etapa >= 0 and not _ativa:
+		render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		return
 	if _aquecendo > 0:
 		_passo_do_aquecimento()
 		if not _ativa:
