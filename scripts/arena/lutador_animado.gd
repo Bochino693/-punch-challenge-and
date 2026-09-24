@@ -31,6 +31,9 @@ const ANIMACOES := {
 	"knockout": ["Death_A", false, 1.0],
 	"get_up": ["Lie_StandUp", false, 1.0],
 	"celebra": ["Cheer", true, 1.0],
+	"deboche": ["Cheer", true, 1.2],
+	"tonto": ["Hit_B", false, 0.5],
+	"soco_tela": ["Unarmed_Melee_Attack_Punch_A", false, 1.0],
 }
 
 var _modelo: Node3D = null

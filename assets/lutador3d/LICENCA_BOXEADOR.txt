@@ -1,0 +1,14 @@
+BOXEADOR (boxeador.glb e boxeador_*.jpg/png)
+============================================
+
+Gerado por tools/gerar_boxeador.py. Nada foi baixado de loja de modelos:
+
+- CORPO: "Anny" (NAVER Corporation, licença Apache 2.0), que usa o corpo
+  do MakeHuman / MPFB2 (licença CC0 1.0 - domínio público). Uso livre,
+  inclusive comercial.
+- EXPRESSÕES DO ROSTO: "Face Units" de Mika Suominen (CC0 1.0), via Anny.
+- ESQUELETO, CALÇÃO, BOTAS, LUVAS, DENTES E TODAS AS TEXTURAS: feitos pelo
+  próprio script deste projeto (pintura procedural em 4096 px).
+
+Para regenerar:  pip install anny scikit-image scipy pillow numpy
+                 python tools/gerar_boxeador.py

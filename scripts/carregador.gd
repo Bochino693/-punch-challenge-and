@@ -29,8 +29,8 @@ const SELO_CENTRO := Vector2(540.0, 900.0)
 const SELO_TAMANHO := 560.0
 
 ## Quadros e tempo mínimos com o jogo já montado por baixo, aquecendo.
-const AQUECER_QUADROS := 45
-const AQUECER_SEGUNDOS := 0.9
+const AQUECER_QUADROS := 60
+const AQUECER_SEGUNDOS := 1.3
 const SUMIR_SEGUNDOS := 0.45
 
 enum Fase { CARREGANDO, MONTANDO, AQUECENDO, SUMINDO, PRONTO }

@@ -30,3 +30,7 @@ __pycache__/
 *.zip
 final_project/
 /tools/android_usb_plugin/.gradle/
+
+# Gerador do boxeador: cache do Anny e prévias das texturas.
+tools/.cache_boxeador.npz
+tools/.previa_*.jpg

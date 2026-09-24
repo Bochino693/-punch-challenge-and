@@ -87,28 +87,74 @@ const CHANCE_PERFEITA := 1000
 
 ## O SOCO DE VERDADE NUNCA DÁ O MESMO NÚMERO DUAS VEZES.
 ##
-## A curva diz o valor "de tabela"; em cima dele entra uma variação de
-## uns 6% para cada lado (dois sorteios somados: perto do centro é o mais
-## comum, as pontas são raras). Acima de 8000 a subida fica mais cara: o
-## que passa de 8000 é pago só em parte, por sorteio. O teto (9999 de
-## tabela) fica como está, para o sorteio do perfeito continuar valendo.
-const VARIACAO := 0.06
+## A curva diz o valor "de tabela". Em cima dele entram quatro camadas, e
+## cada uma resolve uma queixa diferente:
+##
+##   1. UM SINO LARGO (três sorteios somados, ±13% nas pontas). Perto do
+##      valor de tabela é o mais comum; as pontas são raras. A média é a
+##      própria tabela: a dificuldade não muda, só a leitura fica viva.
+##   2. O "DIA BOM / DIA RUIM" (18% das vezes): um empurrão extra de 6 a
+##      16% para cima ou para baixo. É o que faz dois socos parecidos
+##      darem números bem diferentes de vez em quando — a volatilidade
+##      que a máquina de salão tem e que a tabela sozinha não tem.
+##   3. A PAREDE DOS 8000. Acima de `LIMIAR_DIFICIL` a subida é
+##      assintótica e com sorteio de sorte: cada ponto a mais custa mais
+##      que o anterior, e o teto (9998) nunca é alcançado por conta.
+##      Passar de 8000 continua sendo para poucos; passar de 9500, para
+##      raríssimos; 9999 é só o prêmio do `CHANCE_PERFEITA`.
+##   4. NADA DE NÚMERO FIXO. Os últimos dígitos recebem um tremido próprio,
+##      número redondo (x00) é desviado, e uma nota igual a uma das últimas
+##      `MEMORIA_DE_NOTAS` é empurrada para o lado. Quem joga duas vezes
+##      seguidas nunca vê o mesmo número, e o 9998 de "encostou no teto"
+##      deixou de existir: quem encosta no teto cai espalhado entre ~9000
+##      e ~9900.
+const VARIACAO := 0.13
+const CHANCE_DE_EMBALO := 0.18
+const EMBALO_MIN := 0.06
+const EMBALO_MAX := 0.16
 const LIMIAR_DIFICIL := 8000
+## Quanto sobra acima da parede e quão depressa ela "endurece".
+const FAIXA_ALTA := 1998.0
+const ESCALA_ALTA := 1650.0
+const TREMIDO_DOS_DIGITOS := 27
+const MEMORIA_DE_NOTAS := 16
 
-static func variar(pontos: int, a: float, b: float, c: float) -> int:
-	if pontos <= 0 or pontos >= GameDef.SCORE_MAX:
+static func variar(pontos: int, sorte: RandomNumberGenerator, recentes: Array = []) -> int:
+	if pontos <= 0:
 		return pontos
-	var fator := 1.0 + (a + b - 1.0) * VARIACAO * 2.0
-	var nota := float(pontos) * fator
-	if nota > LIMIAR_DIFICIL:
-		nota = LIMIAR_DIFICIL + (nota - LIMIAR_DIFICIL) * lerpf(0.45, 1.0, c)
-	return clampi(int(round(nota)), 1, GameDef.SCORE_MAX - 1)
+	var base := float(mini(pontos, GameDef.SCORE_MAX))
+	var sino := (sorte.randf() + sorte.randf() + sorte.randf()) / 1.5 - 1.0
+	var fator := 1.0 + sino * VARIACAO
+	if sorte.randf() < CHANCE_DE_EMBALO:
+		var embalo := sorte.randf_range(EMBALO_MIN, EMBALO_MAX)
+		fator += embalo if sorte.randf() < 0.5 else -embalo
+	var nota := base * maxf(fator, 0.5)
+	nota = parede_dos_8000(nota, sorte.randf_range(0.55, 1.0))
+	var final := int(round(nota)) + sorte.randi_range(-TREMIDO_DOS_DIGITOS, TREMIDO_DOS_DIGITOS)
+	final = clampi(final, 1, GameDef.SCORE_MAX - 1)
+	# Número redondo ou repetido parece valor de tabela: desvia.
+	var tentativas := 0
+	while (final % 100 == 0 or recentes.has(final)) and tentativas < 12:
+		var passo := sorte.randi_range(3, 41)
+		final = clampi(final + (passo if sorte.randf() < 0.5 else -passo), 1, GameDef.SCORE_MAX - 1)
+		tentativas += 1
+	return final
 
-static func aplicar_perfeito_raro(pontos: int, sorteio: int) -> int:
-	var nota := clampi(pontos, 0, GameDef.SCORE_MAX)
-	if nota < GameDef.SCORE_MAX:
+## A PAREDE: até 8000 nada muda; acima, o excesso é pago em parte, com
+## rendimento decrescente. `sorte` (0,55 a 1) decide quanto do excesso
+## "entra" neste soco.
+static func parede_dos_8000(nota: float, sorte: float) -> float:
+	if nota <= LIMIAR_DIFICIL:
 		return nota
-	return GameDef.SCORE_MAX if posmod(sorteio, CHANCE_PERFEITA) == 0 else GameDef.SCORE_MAX - 1
+	var excesso := (nota - LIMIAR_DIFICIL) * clampf(sorte, 0.0, 1.0)
+	return LIMIAR_DIFICIL + FAIXA_ALTA * (1.0 - exp(-excesso / ESCALA_ALTA))
+
+## O 9999 continua sendo um prêmio: só o golpe que encostou no teto da
+## tabela entra no sorteio, e um em `CHANCE_PERFEITA` leva.
+static func aplicar_perfeito_raro(tabela: int, pontos: int, sorteio: int) -> int:
+	if tabela < GameDef.SCORE_MAX:
+		return clampi(pontos, 0, GameDef.SCORE_MAX - 1)
+	return GameDef.SCORE_MAX if posmod(sorteio, CHANCE_PERFEITA) == 0 else clampi(pontos, 0, GameDef.SCORE_MAX - 1)
 
 static func sanitize(
 	min_speed: float, max_speed: float, contraste: float, dead_zone: float,

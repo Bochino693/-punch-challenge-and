@@ -41,6 +41,50 @@ const TEX_BRILHO := "res://assets/arena/brilho.png"
 const TEX_FACHO := "res://assets/arena/facho.png"
 
 const COR_FUNDO := Color("07060b")
+const TEX_TORCIDA_BAIXO := "res://assets/arena/torcida_baixo.png"
+const TEX_TORCIDA_CIMA := "res://assets/arena/torcida_cima.png"
+
+## A PLATEIA MEXE. Colunas de gente pulam e levantam os braços conforme
+## `agito`; o telão de LED do fundo rola devagar o tempo todo.
+const SHADER_TORCIDA := """
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never;
+uniform sampler2D baixo : source_color, filter_linear_mipmap;
+uniform sampler2D cima : source_color, filter_linear_mipmap;
+uniform float agito = 0.0;
+uniform float tempo = 0.0;
+uniform float acende = 1.0;
+void fragment() {
+	vec2 uv = UV;
+	float col = floor(uv.x * 72.0);
+	float r = fract(sin(col * 78.233) * 43758.5453);
+	float pulo = max(0.0, sin(tempo * (6.5 + r * 4.0) + r * 6.2831)) * agito;
+	uv.y += pulo * 0.045 * (0.6 + r * 0.4);
+	uv.x += sin(tempo * 2.3 + r * 9.0) * 0.0025 * agito;
+	vec4 a = texture(baixo, uv);
+	vec4 b = texture(cima, uv);
+	float mao = step(0.55, 0.5 + 0.5 * sin(tempo * (3.0 + r * 2.0) + r * 12.0)) * step(0.35 - agito * 0.3, r) * step(0.05, agito);
+	vec4 c = mix(a, b, mao);
+	ALBEDO = c.rgb * acende * (1.0 + agito * 0.35);
+	ALPHA = c.a * (0.75 + 0.25 * agito);
+}
+"""
+const SHADER_FUNDO := """
+shader_type spatial;
+render_mode unshaded;
+uniform sampler2D tex : source_color, filter_linear_mipmap;
+uniform float tempo = 0.0;
+uniform float acende = 1.0;
+uniform float agito = 0.0;
+void fragment() {
+	vec2 uv = UV;
+	float faixa = step(0.155, uv.y) * step(uv.y, 0.265);
+	uv.x = fract(uv.x + faixa * tempo * 0.018);
+	vec3 c = texture(tex, uv).rgb;
+	float pisca = 1.0 + faixa * agito * 0.35 * sin(tempo * 9.0);
+	ALBEDO = c * acende * pisca;
+}
+"""
 
 var lutador: Lutador3D = null
 var camera: Camera3D = null
@@ -51,7 +95,12 @@ var _mundo: Node3D = null
 var _luz_chave: DirectionalLight3D = null
 var _rim_quente: OmniLight3D = null
 var _rim_frio: OmniLight3D = null
-var _mat_fundo: StandardMaterial3D = null
+var _mat_fundo: ShaderMaterial = null
+var _mat_torcida: ShaderMaterial = null
+## A torcida: quanto ela está agitada (0..1) e para onde vai.
+var _agito := 0.0
+var _agito_alvo := 0.0
+var _agito_ate := 0.0
 var _mat_lona: StandardMaterial3D = null
 var _flashes: MultiMeshInstance3D = null
 var _flash_fase := PackedFloat32Array()
@@ -176,10 +225,25 @@ func _peca(malha: Mesh, material: Material, onde: Vector3, giro := Vector3.ZERO)
 
 func _montar_fundo() -> void:
 	# A plateia pintada: um plano grande bem atrás do ringue.
-	_mat_fundo = _material_plano(load(TEX_FUNDO))
+	_mat_fundo = ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = SHADER_FUNDO
+	_mat_fundo.shader = sh
+	_mat_fundo.set_shader_parameter("tex", load(TEX_FUNDO))
 	var quadro := QuadMesh.new()
 	quadro.size = Vector2(10.4, 7.8)
 	_peca(quadro, _mat_fundo, Vector3(0.0, 1.9, -4.8))
+	# A GENTE da plateia, em silhueta, na frente do fundo pintado.
+	if ResourceLoader.exists(TEX_TORCIDA_BAIXO) and ResourceLoader.exists(TEX_TORCIDA_CIMA):
+		_mat_torcida = ShaderMaterial.new()
+		var sh2 := Shader.new()
+		sh2.code = SHADER_TORCIDA
+		_mat_torcida.shader = sh2
+		_mat_torcida.set_shader_parameter("baixo", load(TEX_TORCIDA_BAIXO))
+		_mat_torcida.set_shader_parameter("cima", load(TEX_TORCIDA_CIMA))
+		var gente := QuadMesh.new()
+		gente.size = Vector2(10.0, 2.5)
+		_peca(gente, _mat_torcida, Vector3(0.0, 0.55, -4.3))
 	# O chão do ginásio entre o ringue e a plateia: escuro, só para o
 	# tablado parecer suspenso.
 	var chao := PlaneMesh.new()
@@ -371,10 +435,10 @@ static func _mancha_redonda() -> GradientTexture2D:
 
 
 func instalar() -> bool:
-	# O LUTADOR 3D. Primeiro o guerreiro humano com animações próprias
-	# (`LutadorAnimado3D`); se o arquivo dele faltar, o Vanguard posado em
-	# código (`LutadorModelo3D`).
-	for tipo in [LutadorAnimado3D, LutadorModelo3D]:
+	# O LUTADOR 3D. Primeiro o boxeador (`LutadorBoxeador3D`, corpo humano
+	# com IK e expressões); se o arquivo dele faltar, o guerreiro animado
+	# (`LutadorAnimado3D`) e, por fim, o Vanguard posado em código.
+	for tipo in [LutadorBoxeador3D, LutadorAnimado3D, LutadorModelo3D]:
 		var modelo: Lutador3D = tipo.new()
 		modelo.name = "Lutador"
 		modelo.position.y = PISO_DO_LUTADOR
@@ -483,7 +547,30 @@ func golpe(forca: float, derruba := false, pontos := -1, ultimo := false) -> Dic
 	return resposta
 
 
+## A TORCIDA REAGE: `intensidade` 0..1 por `segundos`, depois acalma.
+func agitar(intensidade: float, segundos := 4.0) -> void:
+	_agito_alvo = maxf(_agito_alvo, clampf(intensidade, 0.0, 1.0))
+	_agito_ate = maxf(_agito_ate, _relogio + segundos)
+
+
+func fim_de_rodada(desfecho: String) -> void:
+	if lutador != null:
+		lutador.fim_de_rodada(desfecho)
+
+
+## Pede ao lutador o soco na câmera. Falso se ele não pode agora.
+func soco_na_tela() -> bool:
+	return lutador != null and _ativa and lutador.soco_na_tela()
+
+
+## Verdadeiro uma vez, no quadro em que a luva "acerta" a tela.
+func tela_atingida() -> bool:
+	return lutador != null and lutador.tela_atingida()
+
+
 func preparar() -> void:
+	_agito_alvo = 0.0
+	_agito_ate = 0.0
 	if lutador != null:
 		lutador.preparar()
 	_tremor = 0.0
@@ -516,7 +603,11 @@ func avancar(delta: float) -> void:
 	_clarao = maxf(0.0, _clarao - delta * 2.4)
 	_empurrao = maxf(0.0, _empurrao - delta * 1.6)
 	_publico = maxf(0.0, _publico - delta * 0.72)
+	if _relogio > _agito_ate:
+		_agito_alvo = maxf(0.0, _agito_alvo - delta * 0.35)
+	_agito = lerpf(_agito, maxf(_agito_alvo, _publico * 0.6), 1.0 - exp(-delta * 4.0))
 	if lutador != null:
+		lutador.ponto_da_camera = camera.global_position
 		lutador.atualizar(delta)
 	_sombra_de_contato()
 	_camera()
@@ -555,7 +646,8 @@ func _camera() -> void:
 	var sacode := Vector3.ZERO
 	if _tremor > 0.02:
 		sacode = Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-0.4, 0.4)) * _tremor * 0.05
-	var pos := Vector3(passeio, _altura_da_camera + sin(_relogio * 0.21) * 0.05, _distancia - _empurrao * 0.30)
+	var extra := lutador.camera_extra() if lutador != null else Vector2.ZERO
+	var pos := Vector3(passeio * (1.0 - clampf(extra.x * 1.5, 0.0, 1.0)), _altura_da_camera + sin(_relogio * 0.21) * 0.05 - extra.y, _distancia - _empurrao * 0.30 - extra.x)
 	var mira := Vector3(0.0, _altura_da_mira + _empurrao * 0.06, 0.0)
 	var caido := lutador.queda if lutador != null else 0.0
 	if caido > 0.001:
@@ -576,13 +668,20 @@ func _luzes() -> void:
 	_luz_chave.light_energy = 1.6 + _clarao * 1.0
 	# Materiais sem luz acendem pelo albedo: o salão inteiro pisca junto.
 	var acende := 1.0 + _clarao * 0.55
-	_mat_fundo.albedo_color = Color(acende, acende, acende)
+	_mat_fundo.set_shader_parameter("acende", acende)
+	_mat_fundo.set_shader_parameter("tempo", _relogio)
+	_mat_fundo.set_shader_parameter("agito", _agito)
+	if _mat_torcida != null:
+		_mat_torcida.set_shader_parameter("acende", acende)
+		_mat_torcida.set_shader_parameter("tempo", _relogio)
+		_mat_torcida.set_shader_parameter("agito", _agito)
 	_mat_lona.albedo_color = Color(acende, acende, acende)
 	for i in range(_fachos.size()):
 		var f := _fachos[i]
 		f.rotation.z = sin(_relogio * (0.35 + 0.1 * float(i)) + float(i) * 2.1) * 0.35
 		var mat := f.material_override as StandardMaterial3D
-		mat.albedo_color.a = 0.20 + _publico * 0.35 + _clarao * 0.25
+		mat.albedo_color.a = 0.20 + _publico * 0.35 + _clarao * 0.25 + _agito * 0.25
+		f.rotation.z += sin(_relogio * 2.6 + float(i)) * 0.25 * _agito
 
 
 func _piscar() -> void:
@@ -590,7 +689,7 @@ func _piscar() -> void:
 	for i in range(mm.instance_count):
 		var fase: float = _flash_fase[i]
 		var base := maxf(0.0, sin(_relogio * 1.7 + fase) - 0.93) * 12.0
-		var festa := (_clarao + _publico * 0.6) * maxf(0.0, sin(fase * 3.1 + _relogio * 22.0))
+		var festa := (_clarao + _publico * 0.6 + _agito * 0.5) * maxf(0.0, sin(fase * 3.1 + _relogio * 22.0))
 		var a := clampf(base + festa, 0.0, 1.0)
 		mm.set_instance_color(i, Color(a, a * 0.97, a * 0.92, a))
 
