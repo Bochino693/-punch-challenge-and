@@ -1044,6 +1044,10 @@ func _notification(what: int) -> void:
 			_sair_do_jogo()
 
 var _saindo := false
+## Quando câmera/Arduino podem começar (depois do carregamento) e quando o
+## diário da inicialização é dado por concluído (se nada travou até lá).
+var _perifericos_em := 0.0
+var _diario_fecha_em := -1.0
 var _vida_do_fundo := -1.0
 
 ## SAIR SEM TRAVAR.
@@ -1170,6 +1174,9 @@ func _alvo() -> Vector2:
 # CICLO
 # ======================================================================
 func _process(delta: float) -> void:
+	if _diario_fecha_em >= 0.0 and animation_time >= _diario_fecha_em:
+		_diario_fecha_em = -1.0
+		Diario.pronto()
 	# O impacto não suspende mais a UI, partículas e relógios da rodada.
 	# O clarão/tremor já comunicam a pancada sem congelar a tela inteira.
 	hitstop_left = maxf(0.0, hitstop_left - delta)
@@ -1323,8 +1330,13 @@ func _ritmo_da_camera() -> int:
 	return 3000
 
 func soltar_entrada() -> void:
+	Diario.marca("JOGO: fim do ensaio")
 	_encerrar_ensaio()
 	entrada_segurada = false
+	Diario.marca("JOGO: liberado (abertura na tela)")
+	# O Arduino começa 3 s depois da abertura aparecer; a câmera, 1,5 s.
+	_perifericos_em = animation_time + 3.0
+	_diario_fecha_em = animation_time + 25.0
 	# SÓ AGORA câmera e Arduino começam (e as janelas de permissão, se
 	# forem necessárias): o carregamento já terminou.
 	if camera_service != null:
@@ -2627,11 +2639,16 @@ var _ensaio_feito := false
 func _passo_do_ensaio() -> void:
 	_ensaio += 1
 	if _ensaio == 1:
+		Diario.marca("ENSAIO: montando a arena 3D")
 		_montar_arena()
+		Diario.marca("ENSAIO: arena montada")
+	if _ensaio == 2:
+		Diario.marca("ENSAIO: telas 2D")
 	var q := _ensaio - ENSAIO_QUADROS_2D
 	if q >= 0 and q % ENSAIO_QUADROS_POR_ETAPA == 0 and arena != null:
 		var etapa := q / ENSAIO_QUADROS_POR_ETAPA
 		if etapa <= Arena3D.ETAPAS_DE_AQUECIMENTO:
+			Diario.marca("ENSAIO: arena etapa %d" % etapa)
 			arena.etapa_de_aquecimento(etapa)
 	if _ensaio > ENSAIO_QUADROS:
 		_encerrar_ensaio()
@@ -3486,7 +3503,10 @@ func _tentar_conectar() -> void:
 	_porta_confirmada = false
 	_porta_pedida_em = animation_time
 	_porta_aberta_em = animation_time
-	if link.open_port(porta, GameDef.SERIAL_BAUD):
+	Diario.marca("ARDUINO: abrindo %s" % porta)
+	var abriu := link.open_port(porta, GameDef.SERIAL_BAUD)
+	Diario.marca("ARDUINO: %s" % ("aberta" if abriu else "nao abriu (%s)" % link.motivo_da_falta()))
+	if abriu:
 		porta_atual = porta
 		ultimo_sinal_ms = -1
 		proximo_ping = animation_time + 1.0
@@ -3588,7 +3608,7 @@ func _poll_serial(_delta: float) -> void:
 		# Nada de USB durante o carregamento, com uma janela do Android na
 		# frente, ou antes de a janela da câmera ter sido respondida (uma
 		# janela de cada vez).
-		var pode := not entrada_segurada and Porteiro.livre() \
+		var pode := not entrada_segurada and animation_time >= _perifericos_em and Porteiro.livre() \
 			and (camera_service == null or camera_service.permissao_resolvida())
 		if animation_time >= proxima_tentativa and _hora_de_procurar() and pode:
 			_tentar_conectar()
@@ -5100,6 +5120,7 @@ func _draw() -> void:
 		_draw_partida()
 
 	fx.desenhar(self)
+	_draw_marca_pedida()
 	_draw_pancada()
 	_draw_clarao()
 	_draw_soco_na_tela()
@@ -5626,6 +5647,11 @@ func _draw_show_idle() -> void:
 		)
 	_draw_placa_de_creditos(cor_credito, chegada)
 	_draw_moedas()
+	# SE A ABERTURA ANTERIOR TRAVOU, a tela diz onde (por 2 minutos). É o
+	# que permite corrigir sem cabo nem computador: basta uma foto.
+	var travou := Diario.travou_em()
+	if not travou.is_empty() and animation_time < 120.0:
+		_letreiro_centrado("A ÚLTIMA ABERTURA PAROU EM:  " + travou, 1890.0, 20, Color(Paleta.AMBAR, 0.9), fonte_texto)
 
 ## A PLACA DE CRÉDITOS. Era uma linha amarela miúda solta sobre a faixa
 ## vermelha do rodapé — cor quente em cima de cor quente, e pequena: de
@@ -7999,12 +8025,7 @@ func _marca_da_casa(y: float, altura: float, alpha := 1.0) -> void:
 		# seria pior do que uma abertura com a marca escrita.
 		_texto("LAZER & SPORT GAMES", y + altura * 0.72, 28, Color(Paleta.CIANO, alpha))
 		return
-	var proporcao := logo.get_width() / float(logo.get_height())
-	var largura := altura * proporcao
-	draw_texture_rect(
-		logo, Rect2(Vector2(540.0 - largura * 0.5, y), Vector2(largura, altura)),
-		false, Color(1, 1, 1, alpha)
-	)
+	Logos.desenhar(self, "lazersport", Vector2(540.0, y + altura * 0.5), altura, alpha)
 
 ## A MARCA DA CASA À DIREITA, discreta, na linha `y`.
 ##
@@ -8012,14 +8033,22 @@ func _marca_da_casa(y: float, altura: float, alpha := 1.0) -> void:
 ## tem de ir para o 3-2-1 e para a câmera, e uma marca ao lado é uma
 ## segunda coisa pedindo o olho no segundo em que a pessoa está se
 ## ajeitando para a foto.
+## A MARCA LATERAL É DESENHADA POR ÚLTIMO (em `_draw`, depois de efeitos e
+## partículas): aqui só se anota onde ela vai. Nada passa por cima dela, e
+## ela nunca fica menor que 90 px — abaixo disso a marca vira borrão.
+var _marca_pedida := {}
+
 func _marca_lateral(y: float, alpha := 0.85, altura := 96.0) -> void:
-	if logo == null:
+	_marca_pedida = {"y": y, "alpha": alpha, "altura": maxf(altura, 90.0)}
+
+func _draw_marca_pedida() -> void:
+	if _marca_pedida.is_empty():
 		return
-	var largura := altura * logo.get_width() / float(logo.get_height())
-	draw_texture_rect(
-		logo, Rect2(Vector2(1000.0 - largura, y), Vector2(largura, altura)),
-		false, Color(1, 1, 1, alpha)
-	)
+	var altura: float = _marca_pedida["altura"]
+	# Canto de baixo à direita, dentro da tela, com margem.
+	var y := minf(float(_marca_pedida["y"]), TELA.y - altura - 14.0)
+	Logos.desenhar(self, "lazersport", Vector2(1040.0, y), altura, float(_marca_pedida["alpha"]), 1)
+	_marca_pedida = {}
 
 ## Letreiro centrado na largura útil, sem encolher: o corpo dos rótulos é
 ## fixo de propósito, e um rótulo que não cabe é um rótulo comprido

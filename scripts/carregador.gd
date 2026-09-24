@@ -114,6 +114,8 @@ var _fonte_numero: Font
 
 
 func _ready() -> void:
+	Diario.inicio()
+	Diario.marca("CARREGADOR: abriu")
 	_configurar_janela()
 	_selo = load("res://assets/branding/selo_lazer.png")
 	_fonte = _carregar_fonte("res://assets/fonts/SairaCondensed-ExtraBold.ttf")
@@ -262,6 +264,7 @@ func _montar_jogo() -> void:
 			cena = r
 	if cena == null:
 		cena = load(CENA_DO_JOGO)
+	Diario.marca("MONTANDO: criando a cena do jogo")
 	_jogo = cena.instantiate()
 	if "entrada_segurada" in _jogo:
 		_jogo.entrada_segurada = true
@@ -270,6 +273,7 @@ func _montar_jogo() -> void:
 	else:
 		add_child(_jogo)
 	move_child(_camada, -1)
+	Diario.marca("MONTANDO: cena do jogo criada")
 	_progresso = 0.9
 	_mudar(Fase.AQUECENDO)
 
@@ -312,6 +316,7 @@ func _topo_da_barra() -> float:
 func _mudar(nova: Fase) -> void:
 	fase = nova
 	_fase_tempo = 0.0
+	Diario.marca("CARREGADOR: fase %s" % Fase.keys()[nova])
 
 
 func _camada_alfa(a: float) -> void:
