@@ -1,17 +1,33 @@
-ATUALIZACAO AUTOMATICA ANDROID
+SUPER BOXING (Punch Challenge) - BUILD 83
+=========================================
 
-1. Copie TODO o conteudo desta pasta para dentro da pasta
-   PunchChallenge-Android-TVBox existente.
-2. Confirme "Substituir os arquivos no destino".
-3. Abra PowerShell dentro de PunchChallenge-Android-TVBox.
-4. Execute somente:
+GERAR O APK (um clique so)
+--------------------------
+1. Clique duas vezes em  GERAR_APK_AGORA.bat
+2. Espere. A janela mostra cada passo e NAO fecha sozinha:
+   no fim aparece  SUCESSO  (ou  FALHA  com o motivo).
+3. O APK fica em:  build\android\PunchChallenge.apk
 
-   powershell -ExecutionPolicy Bypass -File .\GERAR_APK_COMPLETO.ps1
+Precisa no PC (o mesmo de sempre):
+  - Godot 4.6.1 (em Downloads ou Documentos, ou aberto)
+  - Android SDK em C:\AndroidSdk
+  - Java 17 e internet (na primeira vez baixa os modelos do Godot)
 
-O script configura C:\AndroidSdk, encontra Godot 4.6.1, compila o plugin USB,
-exporta e verifica o APK. O resultado valido fica em:
+Se o plugin USB nao compilar, a janela avisa e o APK sai assim mesmo,
+com o plugin que ja estava na pasta.
 
-   build\android\PunchChallenge.apk
+INSTALAR NA TV BOX
+------------------
+Pela USB/rede com ADB: clique duas vezes em  INSTALAR_NA_TVBOX.bat
+(ele instala por cima, sem apagar ranking e ajustes, e ja libera a camera).
+Ou copie o PunchChallenge.apk para a TV Box e instale por la.
 
-Nao aceite apenas uma mensagem escrita na tela: o script somente mostra
-"APK GERADO E CONFERIDO" depois de confirmar arquivo e tamanho.
+PRIMEIRA VEZ NA TV BOX
+----------------------
+Espere a barra de carregamento terminar. So depois aparecem as janelas:
+  1. CAMERA   -> Permitir
+  2. ARDUINO  -> marque a caixa e toque OK (so na primeira vez)
+A camera abre sozinha e se religa se parar.
+
+O resto dos arquivos (scripts internos, notas de versoes antigas) esta em
+tools\gerar_apk e docs\historico - nao precisa abrir.
