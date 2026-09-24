@@ -44,6 +44,13 @@ rem IMPORTAR ANTES DE EXPORTAR. Quando uma fonte ou imagem muda, o Godot
 rem reimporta tudo no inicio da exportacao e, no Windows, pode fechar no
 rem meio disso sem criar o APK. Com a importacao feita num passo proprio
 rem (e repetida uma vez, se cair), a exportacao ja encontra tudo pronto.
+rem OS MODELOS 3D SAO REIMPORTADOS DO ZERO. Quando uma atualizacao troca
+rem as texturas de um .glb (o boxeador, por exemplo), a cena importada
+rem antiga guardada em .godot ainda aponta para as texturas que sumiram e
+rem o Godot mostra "Unrecognized UID" -- inofensivo, mas assusta. Apagar
+rem so as cenas .glb importadas resolve; o Godot as refaz em segundos.
+if exist ".godot\imported" del /q ".godot\imported\*.glb-*.scn" ".godot\imported\*.glb-*.md5" 2>nul
+
 echo Importando recursos do projeto...
 "%~1" --headless --path "%CD%" --import
 "%~1" --headless --path "%CD%" --import
