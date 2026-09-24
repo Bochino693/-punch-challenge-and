@@ -385,7 +385,7 @@ var faxina := Faxina.new()
 ## outro golpe (1,2 s de tempo morto mais 200 ms de repouso). Isto é de
 ## propósito: quando a tela diz "SOQUE", a placa já está pronta. Pedir um
 ## soco que seria descartado é a pior coisa que esta máquina pode fazer.
-const ESPERA_PARA_O_PROXIMO_SOCO := 2.5
+const ESPERA_PARA_O_PROXIMO_SOCO := 1.9
 
 ## QUANTO O VEREDITO FICA SOZINHO ANTES DE A TABELA ENTRAR.
 ##
@@ -490,7 +490,25 @@ var zoom_alvo := 1.0
 ## marca, com o alvo do jogo montado nela. Meio segundo, o tempo de a
 ## pessoa entender que a máquina avançou.
 var transicao := -1.0
-const TRANSICAO_DURACAO := 0.38
+const TRANSICAO_DURACAO := 0.34
+
+## A TROCA ENTRE O PRIMEIRO E O SEGUNDO SOCO NÃO É CORTINA.
+##
+## A faixa diagonal atravessando a tela no meio da rodada cortava a luta
+## ao meio: parecia outra tela, outro jogo. Entre os dois golpes a arena,
+## a moldura e os cartões dos socos FICAM PARADOS, e só o que muda muda —
+## a plaqueta do placar encolhe no próprio centro e o veredito sai pela
+## esquerda, enquanto a chamada do segundo soco entra pela direita. Uma
+## luta de dois golpes, sem corte.
+const TROCA_DURACAO := 0.62
+const TROCA_SAIDA := 0.30
+const TROCA_ENTRADA_ATRASO := 0.16
+var _troca := -1.0
+var _troca_placar := ""
+var _troca_cor := Color.WHITE
+var _troca_nome := ""
+var _troca_frase := ""
+var _troca_progresso := 0.0
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -1166,6 +1184,10 @@ func _process(delta: float) -> void:
 		transicao += passo
 		if transicao > TRANSICAO_DURACAO:
 			transicao = -1.0
+	if _troca >= 0.0:
+		_troca += passo
+		if _troca > TROCA_DURACAO:
+			_troca = -1.0
 	if pancada_tempo >= 0.0:
 		pancada_tempo += passo
 		# O zoom volta ao normal assim que o estrelão passa da metade.
@@ -1346,6 +1368,8 @@ func _processar_armado(delta: float) -> void:
 	if _soco_na_tela_em <= 0.0 and not golpe_registrado and arena != null:
 		if arena.soco_na_tela():
 			_soco_na_tela_em = randf_range(SOCO_NA_TELA_DEPOIS.x, SOCO_NA_TELA_DEPOIS.y)
+			# ...e a torcida pede o soco de quem está demorando.
+			sons.play("torcida_incentivo", -9.0)
 		else:
 			_soco_na_tela_em = 1.0
 	if espera_left <= 0.0:
@@ -1390,6 +1414,13 @@ func _armar_proximo_soco() -> void:
 	# seria pedido por cima da festa do primeiro: moldura na cor do nível,
 	# fundo tingido, contagem do placar ainda rodando.
 	sons.stop("score_loop")
+	# O retrato do que sai, para a troca desenhar a saída (ver TROCA_DURACAO).
+	_troca_placar = "%04d" % int(round(displayed_score))
+	_troca_cor = GameDef.classificar(result_score)["cor_faixa"] as Color
+	_troca_nome = ScoreTier.nome_de(result_score) if verdict_time >= 0.0 else ""
+	_troca_frase = arena_frase
+	_troca_progresso = clampf(displayed_score / float(GameDef.SCORE_MAX), 0.0, 1.0)
+	_troca = 0.0
 	displayed_score = 0.0
 	verdict_time = -1.0
 	result_time = 0.0
@@ -1398,16 +1429,18 @@ func _armar_proximo_soco() -> void:
 	fundo.matiz = Color(0, 0, 0, 0)
 	state = GameDef.State.ARMED
 	_armar_sensor_optico()
-	_iniciar_transicao()
 	state_time = 0.0
 	espera_left = GameDef.ESPERA_DO_SOCO
 	golpe_registrado = false
 	_soco_na_tela_em = randf_range(SOCO_NA_TELA_PRIMEIRO.x, SOCO_NA_TELA_PRIMEIRO.y)
 	sons.play("round_bell", -2.0)
 	sons.play("go")
+	# A torcida chama o segundo golpe.
+	sons.play("torcida_incentivo", -7.0)
 	moldura.set_estado(LedFrame.ARMADA)
 	if arena != null:
 		arena.guardar(true)
+		arena.agitar(0.35, 2.5)
 	_show_notice("SOCO %d DE %d" % [socos.size() + 1, SOCOS_POR_RODADA])
 
 ## FECHA A RODADA E DECIDE A NOTA.
@@ -2084,6 +2117,7 @@ func _entrar_em_abertura() -> void:
 	sons.attract(-16.0)
 	sons.stop("torcida_vaia")
 	sons.stop("torcida_festa")
+	sons.stop("torcida_incentivo")
 	state = GameDef.State.IDLE
 	state_time = 0.0
 	verdict_time = -1.0
@@ -2203,7 +2237,13 @@ func _registrar_impacto(
 			_nocaute_na_rodada = true
 		if bool(reacao.get("desdenhou", false)):
 			arena_frase = "ELE NEM SENTIU • TENTE MAIS FORTE"
-			sons.play("torcida_desdenho", -1.0)
+			# NO MEIO DA LUTA A TORCIDA ESTÁ DO LADO DE QUEM BATE. O
+			# lutador desdenha; a plateia responde empurrando o jogador
+			# ("VAI! VAI!"). Vaia só existe no fim, para quem perdeu.
+			if not ultimo:
+				sons.play("torcida_incentivo", -3.0)
+				if arena != null:
+					arena.agitar(0.4, 2.5)
 		if ultimo:
 			_fechar_desfecho()
 	# O BAQUE TEM DUAS CAMADAS AGORA: o couro do impacto e o corpo que
@@ -2251,6 +2291,7 @@ func _fechar_desfecho() -> void:
 		"derrota":
 			if arena != null:
 				arena.agitar(0.5, 8.0)
+			sons.stop("torcida_incentivo")
 			sons.play("torcida_vaia", -1.0)
 			sons.duck(12.0, 6.0)
 			arena_frase = ArenaFrases.de_derrota(plays)
@@ -2402,7 +2443,7 @@ func _draw_ensaio() -> void:
 	if _ensaio_ranking.is_empty():
 		var lista: Array[Dictionary] = []
 		for k in 14:
-			lista.assign(RankingStore.insert(lista, 9400 - k * 530, "", "ENSAIO")["entries"])
+			lista.assign(RankingStore.insert(lista, 9400 - k * 290, "", "ENSAIO")["entries"])
 		_ensaio_ranking = lista
 	var nota: int = ENSAIO_NOTAS[i % ENSAIO_NOTAS.size()]
 	socos = [
@@ -5125,8 +5166,19 @@ func _draw_arena() -> void:
 ## soco aterrissa, com o farol mandando anéis para fora. Chamada, e não
 ## instrumento.
 func _draw_espera_do_soco() -> void:
-	_draw_farol(Paleta.AMBAR)
+	var entrada := 1.0
+	var saida := 1.0
+	if _troca >= 0.0:
+		saida = clampf(_troca / TROCA_SAIDA, 0.0, 1.0)
+		entrada = clampf((_troca - TROCA_ENTRADA_ATRASO) / (TROCA_DURACAO - TROCA_ENTRADA_ATRASO), 0.0, 1.0)
+	var chega := ease(entrada, 0.4)
+	_draw_farol(Paleta.AMBAR, chega)
 	_draw_arena()
+	if saida < 1.0:
+		_draw_troca_saindo(saida)
+	# Tudo o que é desta tela entra pela direita, junto, num gesto só.
+	var base_x := (1.0 - chega) * TELA.x
+	draw_set_transform(Vector2(base_x, 0.0), 0.0, Vector2.ONE)
 	# O ROUND, na barra de baixo da moldura. É a única informação que
 	# cabe ali e a única que a pessoa quer no instante anterior ao soco.
 	_letreiro_centrado(
@@ -5138,9 +5190,9 @@ func _draw_espera_do_soco() -> void:
 	var fraco := animation_time < _fraco_ate
 	if fraco:
 		var tremor := sin(animation_time * 60.0) * 6.0 * clampf(_fraco_ate - animation_time - 1.4, 0.0, 1.0)
-		draw_set_transform(Vector2(tremor, 0.0), 0.0, Vector2.ONE)
+		draw_set_transform(Vector2(base_x + tremor, 0.0), 0.0, Vector2.ONE)
 		_texto_arcade("MAIS FORTE!", 1412.0, 96, Paleta.AMBAR, LARGURA_UTIL)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_set_transform(Vector2(base_x, 0.0), 0.0, Vector2.ONE)
 		_rotulo("ESSE NÃO PONTUOU  •  BATA DE NOVO", 1470.0, Color.WHITE)
 	else:
 		_texto_arcade(chamada, 1412.0, 88, Color(Color.WHITE, piscada), LARGURA_UTIL)
@@ -5153,9 +5205,11 @@ func _draw_espera_do_soco() -> void:
 		Paleta.AMBAR, LARGURA_UTIL
 	)
 	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1580.0, Paleta.TINTA_FRACA)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# Os dois socos ficam à vista DURANTE a espera: é enquanto se prepara
-	# para bater que saber o que o primeiro valeu muda alguma coisa.
-	_draw_cartoes_dos_socos(1612.0, false)
+	# para bater que saber o que o primeiro valeu muda alguma coisa. Na
+	# MESMA altura do resultado: na troca eles não se mexem.
+	_draw_cartoes_dos_socos(1618.0, false)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
@@ -5173,7 +5227,9 @@ func _draw_espera_do_soco() -> void:
 ## meio. Tudo se move para FORA — na direção de quem está olhando,
 ## chamando o punho. Anéis entrando leriam como contagem regressiva, que
 ## é exatamente o que esta tela deixou de ter.
-func _draw_farol(cor: Color) -> void:
+func _draw_farol(cor: Color, forca := 1.0) -> void:
+	if forca <= 0.01:
+		return
 	var centro := ALVO_DO_SOCO
 	var compasso := 1.15
 	# OS ANÉIS SAEM DE TRÁS DO QUADRO.
@@ -5185,7 +5241,7 @@ func _draw_farol(cor: Color) -> void:
 	for i in range(3):
 		var fase := fmod(animation_time / compasso + float(i) / 3.0, 1.0)
 		var raio := lerpf(470.0, 760.0, ease(fase, 0.45))
-		Traco.arco(self, centro, raio, Color(cor, (1.0 - fase) * 0.50), 10.0)
+		Traco.arco(self, centro, raio, Color(cor, (1.0 - fase) * 0.50 * forca), 10.0)
 	# OS CANTOS DE MIRA AGORA ABRAÇAM A MOLDURA. Dizem "é AQUI que o soco
 	# acerta" apontando para a arena, e não para um ponto no vazio — e
 	# respiram, para não virarem um enfeite parado.
@@ -5201,8 +5257,37 @@ func _draw_farol(cor: Color) -> void:
 			# enfeite que atravessa a chamada principal é um enfeite que
 			# está atrapalhando o trabalho da tela.
 			var dy := (72.0 if sy < 0.5 else -44.0)
-			draw_line(canto, canto + Vector2(dx, 0.0), Color(cor, 0.85), 9.0, true)
-			draw_line(canto, canto + Vector2(0.0, dy), Color(cor, 0.85), 9.0, true)
+			draw_line(canto, canto + Vector2(dx, 0.0), Color(cor, 0.85 * forca), 9.0, true)
+			draw_line(canto, canto + Vector2(0.0, dy), Color(cor, 0.85 * forca), 9.0, true)
+
+## A SAÍDA DO PRIMEIRO SOCO na troca: a plaqueta encolhe no próprio
+## centro e o veredito escorrega para a esquerda. `s` vai de 0 a 1.
+func _draw_troca_saindo(s: float) -> void:
+	var vai := ease(s, 2.2)
+	var k := 1.0 - vai
+	if k > 0.01:
+		var c := PLACA_DO_PLACAR.get_center()
+		draw_set_transform(c * (1.0 - k), 0.0, Vector2(k, k))
+		_cartao(PLACA_DO_PLACAR, Color("140c21"), _troca_cor, 1.0, 4.0)
+		_placar(_troca_placar, Vector2(540.0, 1296.0), Color.WHITE, PLACAR_NA_ARENA)
+		var vt := verdict_time
+		verdict_time = 0.0
+		_draw_barra_de_pontuacao(_troca_progresso, 1.0, _troca_cor, false)
+		verdict_time = vt
+	if not _troca_nome.is_empty():
+		draw_set_transform(Vector2(-vai * TELA.x, 0.0), 0.0, Vector2.ONE)
+		var topo_f := 1418.0
+		var base_f := 1580.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(0.0, topo_f + 18.0), Vector2(TELA.x, topo_f - 18.0),
+			Vector2(TELA.x, base_f - 18.0), Vector2(0.0, base_f + 18.0),
+		]), Color("0c0615", 0.80))
+		draw_line(Vector2(0.0, topo_f + 18.0), Vector2(TELA.x, topo_f - 18.0), Color(_troca_cor, 0.9), 3.0, true)
+		draw_line(Vector2(0.0, base_f + 18.0), Vector2(TELA.x, base_f - 18.0), Color(_troca_cor, 0.9), 3.0, true)
+		_texto_arcade(_troca_nome, 1490.0, 78, _troca_cor, LARGURA_UTIL)
+		if not _troca_frase.is_empty():
+			_texto_cabendo(_troca_frase, 1556.0, 44, Paleta.AMBAR, LARGURA_UTIL)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 ## A ABERTURA GIRA EM TRÊS CAPÍTULOS.
 ##
@@ -5431,6 +5516,8 @@ func _draw_score_hero() -> void:
 		_draw_cartoes_dos_socos(1618.0, socos.size() >= SOCOS_POR_RODADA)
 		if posicao_no_ranking > 0:
 			_apoio("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1800.0, Paleta.AMBAR)
+		elif _rodada_terminou() and result_score < RankingStore.MINIMO:
+			_apoio("O TOP 20 COMEÇA EM %d PONTOS" % RankingStore.MINIMO, 1800.0, Paleta.TINTA_FRACA)
 
 ## Barra segmentada de leitura instantânea. Segmentos são mais fáceis de
 ## comparar à distância que um retângulo contínuo e não criam partículas,
@@ -5744,7 +5831,10 @@ func _ranking_cabecalho(entrou: bool, celebracao: Dictionary, tabela: float) -> 
 	_texto_arcade("TOP 20", 206.0 - (1.0 - chegada) * 16.0, 104, Color(Paleta.CIANO, a), LARGURA_UTIL)
 	draw_rect(Rect2(MARGEM + 40.0, 236.0, LARGURA_UTIL - 80.0, 3.0), Color(Paleta.CIANO, 0.5 * a))
 	if not entrou:
-		_texto_cabendo("TENTE SUPERAR ESSAS MARCAS", 296.0, 34, Color(Paleta.TINTA_FRACA, a), LARGURA_UTIL)
+		var recado := "TENTE SUPERAR ESSAS MARCAS"
+		if result_score < RankingStore.MINIMO:
+			recado = "SÓ ENTRA QUEM FAZ %d PONTOS OU MAIS" % RankingStore.MINIMO
+		_texto_cabendo(recado, 296.0, 34, Color(Paleta.TINTA_FRACA, a), LARGURA_UTIL)
 		return
 	var cor: Color = celebracao.get("cor", Paleta.AMBAR)
 	var faixa := Rect2(MARGEM + 150.0, 258.0, LARGURA_UTIL - 300.0, 56.0)

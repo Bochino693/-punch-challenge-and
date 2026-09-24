@@ -474,7 +474,11 @@ func _fator_da_tela() -> float:
 		return 1.0
 	var real := Vector2(raiz.size)
 	var logico := Vector2(raiz.content_scale_size)
-	return clampf(minf(real.x / logico.x, real.y / logico.y), 1.0, FATOR_MAXIMO)
+	# Na TV Box, nunca acima do 1:1: uma saída 4K pedia 2,25x os pixels
+	# (com MSAA por cima) para um ganho que a 2 metros ninguém vê — e era
+	# o que deixava a arena lenta.
+	var teto := 1.0 if OS.has_feature("mobile") else FATOR_MAXIMO
+	return clampf(minf(real.x / logico.x, real.y / logico.y), 1.0, teto)
 
 
 func _aplicar_tamanho() -> void:
@@ -484,7 +488,10 @@ func _aplicar_tamanho() -> void:
 	var novo := Vector2i((TELA_LOGICA * fator).round())
 	if size != novo:
 		size = novo
-	msaa_3d = Viewport.MSAA_2X if _magro else Viewport.MSAA_4X
+	# MSAA 4x só no computador. Na TV Box o 2x já alisa as cordas e o
+	# contorno do lutador, e a resolução do MSAA custa banda que falta.
+	var cheio := Viewport.MSAA_2X if OS.has_feature("mobile") else Viewport.MSAA_4X
+	msaa_3d = Viewport.MSAA_2X if _magro else cheio
 
 
 func _ajustar_tamanho() -> void:
@@ -648,6 +655,7 @@ func tela_atingida() -> bool:
 
 
 func preparar() -> void:
+	_cam_pos = Vector3.INF
 	_agito_alvo = 0.0
 	_agito_ate = 0.0
 	if lutador != null:
@@ -696,7 +704,7 @@ func avancar(delta: float) -> void:
 		lutador.ponto_da_camera = camera.global_position
 		lutador.atualizar(delta)
 	_sombra_de_contato()
-	_camera()
+	_camera(delta)
 	_luzes()
 	_piscar()
 	render_target_update_mode = SubViewport.UPDATE_ONCE
@@ -727,7 +735,17 @@ func _calcular_enquadramento() -> void:
 	_altura_da_mira = _altura_da_camera - CAMERA_ACIMA_DA_MIRA
 
 
-func _camera() -> void:
+## A CÂMERA ANDA, NÃO PULA. Empurrão do golpe, queda, soco na tela e o
+## passeio lento viram um ALVO; a câmera persegue esse alvo com uma mola
+## amortecida (sem ultrapassar). Antes o empurrão do soco entrava inteiro
+## num quadro só e a imagem dava um pulo seco a cada golpe — e de novo
+## quando o segundo soco era armado. O tremor fica de fora da mola: ele é
+## para ser seco.
+var _cam_pos := Vector3.INF
+var _cam_mira := Vector3.ZERO
+const CAMERA_MOLA := 7.5
+
+func _camera(delta := 0.0) -> void:
 	var passeio := sin(_relogio * 0.33) * 0.16
 	var sacode := Vector3.ZERO
 	if _tremor > 0.02:
@@ -742,15 +760,23 @@ func _camera() -> void:
 		pos = pos.lerp(Vector3(0.0, _altura_da_camera * 0.54, _distancia * 1.07), t)
 		mira = mira.lerp(Vector3(0.0, _altura_da_mira * 0.58, 0.0), t)
 	var rolo := 0.0
+	var balanco := Vector3.ZERO
 	if _camb_t >= 0.0 and _camb.size() >= 9:
 		var t := _camb_t
 		var some := pow(1.0 - clampf(t / _camb_dur, 0.0, 1.0), 1.6)
 		var c := _camb
-		pos += Vector3(sin(t * c[0] * TAU * 0.5 + c[1]) * c[2], sin(t * c[3] * TAU * 0.5 + c[4]) * c[5], 0.0) * some
-		mira += Vector3(sin(t * c[3] * TAU * 0.4 + c[1]) * c[2] * 0.6, 0.0, 0.0) * some
+		sacode += Vector3(sin(t * c[0] * TAU * 0.5 + c[1]) * c[2], sin(t * c[3] * TAU * 0.5 + c[4]) * c[5], 0.0) * some
+		balanco = Vector3(sin(t * c[3] * TAU * 0.4 + c[1]) * c[2] * 0.6, 0.0, 0.0) * some
 		rolo = sin(t * c[6] * TAU * 0.5 + c[7]) * c[8] * some
-	camera.position = pos + sacode
-	camera.look_at(mira, Vector3.UP)
+	if _cam_pos == Vector3.INF or delta <= 0.0:
+		_cam_pos = pos
+		_cam_mira = mira
+	else:
+		var k := 1.0 - exp(-CAMERA_MOLA * minf(delta, 0.05))
+		_cam_pos = _cam_pos.lerp(pos, k)
+		_cam_mira = _cam_mira.lerp(mira, k)
+	camera.position = _cam_pos + sacode
+	camera.look_at(_cam_mira + balanco, Vector3.UP)
 	if absf(rolo) > 0.0001:
 		camera.rotate_object_local(Vector3.FORWARD, rolo)
 

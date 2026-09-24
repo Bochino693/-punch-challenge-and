@@ -2,6 +2,12 @@ class_name RankingStore
 extends RefCounted
 
 const LIMIT := 20
+## A NOTA MÍNIMA PARA ENTRAR NO TOP 20. Abaixo disto a rodada conta na
+## estatística, mas não vira linha da tabela: o ranking é de quem bate.
+## Vale também para o que já estava gravado — uma tabela que recusa 4800
+## hoje e ainda mostra um 3200 de ontem estaria mentindo sobre a regra.
+## (As fotos das linhas que saem ficam órfãs e a faxina as recolhe.)
+const MINIMO := 5000
 const PHOTO_DIR := "user://ranking_photos"
 
 ## A VERSÃO DO ESQUEMA DAS MARCAS GUARDADAS.
@@ -29,13 +35,13 @@ static func migrate(raw: Variant, old_best := 0, esquema := ESQUEMA) -> Array[Di
 		for item in raw:
 			if item is Dictionary:
 				var entry := _sanitize_entry(item, fator)
-				if int(entry["score"]) > 0:
+				if int(entry["score"]) >= MINIMO:
 					result.append(entry)
 			else:
 				var score := clampi(int(item) * fator, 0, GameDef.SCORE_MAX)
-				if score > 0:
+				if score >= MINIMO:
 					result.append(_new_entry(score, "", "LEGADO"))
-	if result.is_empty() and old_best > 0:
+	if result.is_empty() and old_best * fator >= MINIMO:
 		result.append(_new_entry(clampi(old_best * fator, 0, GameDef.SCORE_MAX), "", "LEGADO"))
 	result.sort_custom(_higher_score)
 	if result.size() > LIMIT:
@@ -43,6 +49,8 @@ static func migrate(raw: Variant, old_best := 0, esquema := ESQUEMA) -> Array[Di
 	return result
 
 static func insert(entries: Array[Dictionary], score: int, photo_path := "", source := "SENSOR") -> Dictionary:
+	if score < MINIMO:
+		return {"entries": entries.duplicate(true), "position": 0, "dropped_photos": []}
 	var next := entries.duplicate(true)
 	var entry := _new_entry(clampi(score, 0, GameDef.SCORE_MAX), photo_path, source)
 	# O id identifica a tentativa, então empates nunca roubam a posição

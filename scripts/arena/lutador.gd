@@ -14,8 +14,8 @@ const ALTURA_DA_FIGURA := 1.80
 
 const DANO_POR_GOLPE := 0.62
 const DANO_MINIMO := 0.02
-const TEMPO_NA_LONA := 3.35
-const TEMPO_LEVANTAR := 1.25
+const TEMPO_NA_LONA := 1.25
+const TEMPO_LEVANTAR := 1.0
 
 const PAPEIS_CONTINUOS := ["idle", "guard"]
 ## Os papéis que o corpo sabe mostrar. Quem desenha cada um é a subclasse

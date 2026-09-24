@@ -16,6 +16,13 @@ Saídas em assets/tema/:
   moldura_arena.png    faixa zebrada amarelo/preto com cantos chanfrados
                        (a mesma do vidro do gabinete) em volta da arena
 
+E o ÍCONE do aplicativo (a marca SUPER BOXING sobre o fundo do gabinete):
+  assets/icon.png                 512x512  janela/atalho (project.godot)
+  assets/icon-android.png         512x512  lançador Android (192 no APK)
+  assets/icon-android-frente.png  432x432  ícone adaptável: a marca, na
+                                           zona segura do meio
+  assets/icon-android-fundo.png   432x432  ícone adaptável: o fundo
+
 Requer: numpy, scipy, pillow.
 """
 from pathlib import Path
@@ -309,6 +316,44 @@ def moldura_arena():
     print("ok moldura_arena.png", img.size)
 
 
+def icone():
+    """O ícone é a marca do jogo, e só ela: nada de texto extra, que num
+    lançador de TV Box vira borrão. O fundo é o mesmo do gabinete, com o
+    brilho concentrado atrás da estrela."""
+    assets = RAIZ / "assets"
+    marca = Image.open(SAIDA / "logo.png").convert("RGBA")
+
+    def fundo_quadrado(lado):
+        base = Image.open(SAIDA / "fundo.jpg").convert("RGB")
+        # recorte quadrado da faixa de cima do fundo, onde há raios
+        q = base.crop((0, 120, 1080, 1200)).resize((lado, lado), Image.LANCZOS)
+        a = np.asarray(q, np.float32) / 255 * 1.35
+        y, x = np.mgrid[:lado, :lado].astype(np.float32) / lado
+        halo = np.exp(-(((x - 0.5) / 0.36) ** 2 + ((y - 0.5) / 0.30) ** 2))
+        a += halo[..., None] * np.array([0.30, 0.10, 0.55])
+        return Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8)).convert("RGBA")
+
+    def colar(fundo_img, largura):
+        m = marca.resize((largura, round(marca.height * largura / marca.width)), Image.LANCZOS)
+        # sombra suave por baixo, para descolar a estrela do fundo
+        sombra = Image.new("RGBA", fundo_img.size, (0, 0, 0, 0))
+        sa = Image.new("L", fundo_img.size, 0)
+        pos = ((fundo_img.width - m.width) // 2, (fundo_img.height - m.height) // 2)
+        sa.paste(m.split()[3], (pos[0], pos[1] + max(2, largura // 60)))
+        sombra.putalpha(sa.filter(ImageFilter.GaussianBlur(max(2, largura // 45))).point(lambda v: v * 0.7))
+        fundo_img.alpha_composite(sombra)
+        fundo_img.alpha_composite(m, pos)
+        return fundo_img
+
+    for nome in ("icon.png", "icon-android.png"):
+        img = colar(fundo_quadrado(512), 492)
+        img.convert("RGB").save(assets / nome, optimize=True)
+        print("ok", nome)
+    colar(Image.new("RGBA", (432, 432), (0, 0, 0, 0)), 300).save(assets / "icon-android-frente.png", optimize=True)
+    fundo_quadrado(432).convert("RGB").save(assets / "icon-android-fundo.png", optimize=True)
+    print("ok ícone adaptável")
+
+
 if __name__ == "__main__":
     SAIDA.mkdir(parents=True, exist_ok=True)
     fundo()
@@ -316,3 +361,4 @@ if __name__ == "__main__":
     fight()
     never()
     moldura_arena()
+    icone()
