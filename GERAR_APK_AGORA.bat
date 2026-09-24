@@ -4,7 +4,7 @@ title Punch Challenge - Gerar APK Android
 cd /d "%~dp0"
 
 echo ============================================================
-echo   SUPER BOXING - BUILD 85
+echo   SUPER BOXING - BUILD 86
 echo   GERA O APK COMPLETO (PLUGIN USB + JOGO)
 echo ============================================================
 echo.

@@ -1,4 +1,4 @@
-SUPER BOXING (Punch Challenge) - BUILD 85
+SUPER BOXING (Punch Challenge) - BUILD 86
 =========================================
 
 GERAR O APK (um clique so)
@@ -27,14 +27,16 @@ PRIMEIRA VEZ NA TV BOX
 As permissoes vem LOGO NO INICIO, antes da barra andar, uma de cada vez:
   1. CAMERA   -> Permitir
   2. ARDUINO  -> marque a caixa e toque OK (so na primeira vez)
+  3. WEBCAM USB -> so aparece se o Android pedir; marque a caixa e OK
 Depois disso a barra carrega e o jogo NAO abre mais nenhuma janela.
 A camera abre sozinha e se religa se parar.
 
 SE A ABERTURA TRAVAR
 --------------------
-O jogo grava cada etapa da abertura. Se travar, desligue e ligue: na tela
-inicial aparece, embaixo, "A ULTIMA ABERTURA PAROU EM: ...". Fotografe
-essa linha e mande - ela diz exatamente onde parou.
+O jogo grava cada etapa da abertura. Se travar, desligue e ligue: JA NA
+TELA DE CARREGAMENTO aparece, embaixo, uma caixa amarela
+"A ULTIMA ABERTURA PAROU EM: ...". Fotografe essa caixa e mande - ela diz
+exatamente onde parou.
 
 O resto dos arquivos (scripts internos, notas de versoes antigas) esta em
 tools\gerar_apk e docs\historico - nao precisa abrir.

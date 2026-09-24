@@ -166,7 +166,7 @@ func _iniciar_carga() -> void:
 ## tela do carregador — nada pesado pausado no meio, nada aberto à toa — e
 ## o jogo, depois, já encontra tudo autorizado: nenhuma janela no meio da
 ## abertura nem da partida.
-enum Perm { CAMERA, ARDUINO, FIM }
+enum Perm { CAMERA, ARDUINO, WEBCAM, FIM }
 var _perm := Perm.CAMERA
 var _perm_pedido := false
 var _perm_t0 := 0.0
@@ -220,6 +220,8 @@ func _passo_das_permissoes() -> void:
 				_proxima_permissao()
 		Perm.ARDUINO:
 			_passo_do_arduino()
+		Perm.WEBCAM:
+			_passo_da_webcam()
 		Perm.FIM:
 			Diario.marca("PERMISSOES: fim")
 			_perm = Perm.FIM
@@ -262,6 +264,45 @@ func _passo_do_arduino() -> void:
 		return
 	Diario.marca("PERMISSOES: arduino erro (%s)" % erro)
 	_proxima_permissao()
+
+
+## A WEBCAM USB, SE PRECISAR. Quando o Android enxerga a webcam como
+## câmera do sistema (o caso comum), a permissão CAMERA já basta. Só quando
+## ela aparece apenas como aparelho USB é que o Android pede uma janela a
+## mais — e ela vem aqui, no carregamento, e não no meio do jogo.
+func _passo_da_webcam() -> void:
+	if not Engine.has_singleton("PunchUsbSerial") \
+			or not OS.get_granted_permissions().has("android.permission.CAMERA"):
+		_proxima_permissao()
+		return
+	var plugin = Engine.get_singleton("PunchUsbSerial")
+	if _perm_pedido:
+		if _respondida():
+			Diario.marca("PERMISSOES: webcam respondida")
+			_proxima_permissao()
+		return
+	# A contagem das câmeras do sistema sai em segundo plano no plugin:
+	# pergunta agora e dá um instante para a resposta chegar.
+	var sistema := int(plugin.call("getSystemCameraCount"))
+	if sistema > 0:
+		Diario.marca("PERMISSOES: webcam pelo sistema (%d)" % sistema)
+		_proxima_permissao()
+		return
+	_perm_texto = "PROCURANDO A CÂMERA"
+	if _relogio - _perm_t0 < 1.5:
+		return
+	var situacao := str(plugin.call("getUsbCameraStatus"))
+	if not "AGUARDANDO" in situacao:
+		Diario.marca("PERMISSOES: webcam (%s)" % situacao)
+		_proxima_permissao()
+		return
+	_perm_pedido = true
+	_perm_t0 = _relogio
+	_saiu_foco = false
+	_voltou_foco = false
+	_perm_texto = "CÂMERA USB: MARQUE A CAIXA E TOQUE OK"
+	Diario.marca("PERMISSOES: pedindo webcam usb")
+	plugin.call("requestUsbCameraAccess")
 
 
 func _configurar_janela() -> void:
@@ -480,6 +521,16 @@ func _desenhar() -> void:
 	t.draw_string(_fonte_numero, Vector2(caixa.position.x, topo + 100.0), pct, HORIZONTAL_ALIGNMENT_CENTER, largura, 46, Color("ffd014", aparece))
 	var pontos := ".".repeat(1 + int(_relogio * 2.5) % 3)
 	t.draw_string(_fonte, Vector2(caixa.position.x, topo + 150.0), _texto_status() + pontos, HORIZONTAL_ALIGNMENT_CENTER, largura, 28, Color("d9d1ff", 0.9 * aparece))
+	# ONDE A ABERTURA ANTERIOR PAROU, se parou: logo aqui, na primeira tela,
+	# para dar para fotografar mesmo que o jogo trave de novo adiante.
+	var travou := Diario.travou_em()
+	if not travou.is_empty():
+		var aviso := Rect2(40.0, 1790.0, 1000.0, 92.0)
+		t.draw_rect(aviso, Color("0c0615", 0.92 * aparece))
+		t.draw_rect(aviso, Color("ffb000", aparece), false, 2.0)
+		t.draw_string(_fonte, Vector2(aviso.position.x, 1826.0), "A ÚLTIMA ABERTURA PAROU EM:", HORIZONTAL_ALIGNMENT_CENTER, aviso.size.x, 24, Color("ffb000", aparece))
+		t.draw_string(_fonte, Vector2(aviso.position.x + 12.0, 1864.0), travou, HORIZONTAL_ALIGNMENT_CENTER, aviso.size.x - 24.0, 26, Color("ffffff", aparece))
+	t.draw_string(_fonte, Vector2(0.0, 1906.0), "BUILD %d" % Versao.NUMERO, HORIZONTAL_ALIGNMENT_RIGHT, 1060.0, 18, Color("8f86b8", 0.7 * aparece))
 
 
 ## Retângulo com as pontas totalmente redondas, borda lisa, com gradiente
