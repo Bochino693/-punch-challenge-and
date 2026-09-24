@@ -398,6 +398,9 @@ const ESPERA_PARA_O_PROXIMO_SOCO := 2.5
 ##
 ## O valor também encolheu, junto com os três atos abaixo. Ver lá.
 const ESPERA_DO_RANKING := 1.15
+const ESPERA_DO_RANKING_DEBOCHE := 6.8
+const ESPERA_DO_RANKING_FESTA := 3.8
+const ESPERA_DO_RANKING_EMPATE := 2.0
 ## Os socos desta rodada, na ordem em que aconteceram.
 ## Cada item preserva pontos e também as medidas cruas que os explicam.
 var socos: Array = []
@@ -755,6 +758,24 @@ var _fotos_decodificadas: Dictionary = {}
 ## no meio da leitura. O golpe decide uma vez, aqui, e a tela só mostra.
 var arena_frase := ""
 var arena_nocaute := false
+## COMO A RODADA ACABOU, para a arena e a torcida: "" (ainda em jogo),
+## "nocaute", "vitoria" (bateu bem e ele ficou de pé), "empate" ou
+## "derrota" (fraco: ele tira onda e a torcida vaia).
+var desfecho := ""
+var _nocaute_na_rodada := false
+## O SOCO NA TELA: quem demora para bater leva um do lutador.
+const SOCO_NA_TELA_PRIMEIRO := Vector2(6.5, 8.5)
+const SOCO_NA_TELA_DEPOIS := Vector2(7.5, 11.0)
+var _soco_na_tela_em := 7.0
+## O CAMBALEIO depois do soco na tela: travadas curtas (a imagem para e
+## dá um tranco), balanço que morre devagar e uma rachadura no vidro.
+## Tudo sorteado a cada vez: nunca sai igual.
+var _cambaleio_t := -1.0
+var _cambaleio_dur := 1.6
+var _cambaleio_onda := PackedFloat32Array()
+var _travadas: Array = []
+var _rachadura: Array = []
+var _rachadura_t := -1.0
 ## Quantos socos já foram dados — a semente das frases. Ver `ArenaFrases`.
 var arena_semente := 0
 
@@ -863,6 +884,10 @@ func _ready() -> void:
 		_salvar()
 		_show_notice("CONFIGURAÇÃO DE PONTUAÇÃO ATUALIZADA")
 	_montar_arena()
+	# O ENSAIO GERAL só acontece por baixo do carregador (que segura a
+	# entrada). Aberto direto no editor, ninguém cobre a tela.
+	if entrada_segurada:
+		_ensaio = 0
 	_iniciar_serial()
 	_entrar_em_abertura()
 	# A música entra baixa por baixo da entrada e sobe na virada para a
@@ -1058,6 +1083,10 @@ func _process(delta: float) -> void:
 	# O clarão/tremor já comunicam a pancada sem congelar a tela inteira.
 	hitstop_left = maxf(0.0, hitstop_left - delta)
 	_contar_ok_segurado(delta)
+	if _ensaio >= 0:
+		_ensaio += 1
+		if _ensaio > ENSAIO_QUADROS:
+			_encerrar_ensaio()
 	# A gravação pendente sai assim que a anterior termina, e nunca no
 	# quadro em que ela foi pedida. Ver `SettingsStore.save_data_async`.
 	SettingsStore.bombear()
@@ -1103,10 +1132,15 @@ func _process(delta: float) -> void:
 	# 96 segmentos com borda lisa, do anel de 1300 pixels ao de 90, em
 	# todo quadro do impacto. Ver `Traco.arco`.
 	Traco.qualidade = desempenho.qualidade
+	_passo_do_cambaleio(passo)
 	if arena != null:
 		arena.qualidade = desempenho.qualidade
 		arena.ligar(_arena_no_ar())
-		arena.avancar(passo)
+		# Numa travada do cambaleio a arena PARA: a imagem congela por uns
+		# centésimos, como a vista de quem levou um soco.
+		arena.avancar(0.0 if _travado() else passo)
+		if arena.tela_atingida() and state == GameDef.State.ARMED:
+			_levar_soco_na_tela()
 	_socorro_da_camera(passo)
 	if camera_service != null:
 		camera_service.definir_ritmo(_ritmo_da_camera())
@@ -1186,6 +1220,7 @@ func _ritmo_da_camera() -> int:
 	return 2500
 
 func soltar_entrada() -> void:
+	_encerrar_ensaio()
 	entrada_segurada = false
 	intro_time = 0.0
 	ritmo = Ritmo.new()
@@ -1302,6 +1337,7 @@ func _processar_contagem(delta: float) -> void:
 		golpe_registrado = false
 		socos.clear()
 		saturacao_recente = ""
+		_soco_na_tela_em = randf_range(SOCO_NA_TELA_PRIMEIRO.x, SOCO_NA_TELA_PRIMEIRO.y)
 		sons.play("round_bell", -2.0)
 		sons.play("go")
 		sons.music(-19.0)
@@ -1309,6 +1345,14 @@ func _processar_contagem(delta: float) -> void:
 
 func _processar_armado(delta: float) -> void:
 	espera_left -= delta
+	# QUEM DEMORA LEVA. De tempos em tempos o lutador avança e soca a
+	# câmera: é o jeito de a máquina dizer "vai, bate logo".
+	_soco_na_tela_em -= delta
+	if _soco_na_tela_em <= 0.0 and not golpe_registrado and arena != null:
+		if arena.soco_na_tela():
+			_soco_na_tela_em = randf_range(SOCO_NA_TELA_DEPOIS.x, SOCO_NA_TELA_DEPOIS.y)
+		else:
+			_soco_na_tela_em = 1.0
 	if espera_left <= 0.0:
 		# A ESPERA ACABOU SEM SOCO — E A FICHA VOLTA.
 		#
@@ -1363,6 +1407,7 @@ func _armar_proximo_soco() -> void:
 	state_time = 0.0
 	espera_left = GameDef.ESPERA_DO_SOCO
 	golpe_registrado = false
+	_soco_na_tela_em = randf_range(SOCO_NA_TELA_PRIMEIRO.x, SOCO_NA_TELA_PRIMEIRO.y)
 	sons.play("round_bell", -2.0)
 	sons.play("go")
 	moldura.set_estado(LedFrame.ARMADA)
@@ -1510,7 +1555,7 @@ func _tabela_no_ar() -> bool:
 		return false
 	if _dois_socos_bons() and sons.playing("good_player"):
 		return false
-	return verdict_time >= ESPERA_DO_RANKING
+	return verdict_time >= _espera_do_ranking()
 
 const SONS_RANKING_NEUTROS := [
 	"ranking_neutral_1", "ranking_neutral_2", "ranking_neutral_3",
@@ -2004,6 +2049,10 @@ func _iniciar_rodada() -> void:
 	arena_frase = ""
 	arena_nocaute = false
 	arena_semente = 0
+	desfecho = ""
+	_nocaute_na_rodada = false
+	_cambaleio_t = -1.0
+	_rachadura_t = -1.0
 	if arena != null:
 		arena.preparar()
 		arena.guardar(true)
@@ -2034,6 +2083,8 @@ func _entrar_em_abertura() -> void:
 	# aqui era `silence()`, que também matava a música: a tela que fica
 	# ligada o dia inteiro chamando gente era a única muda do jogo.
 	sons.attract(-16.0)
+	sons.stop("torcida_vaia")
+	sons.stop("torcida_festa")
 	state = GameDef.State.IDLE
 	state_time = 0.0
 	verdict_time = -1.0
@@ -2149,12 +2200,13 @@ func _registrar_impacto(
 		var ultimo := socos.size() >= SOCOS_POR_RODADA
 		var reacao := arena.golpe(forca_visual, derruba, result_score, ultimo)
 		arena_nocaute = bool(reacao["nocaute"])
-		if ultimo and not arena_nocaute:
-			# Ele aguentou: a torcida comemora com ele.
-			sons.play("arena_publico", -4.0)
+		if arena_nocaute:
+			_nocaute_na_rodada = true
 		if bool(reacao.get("desdenhou", false)):
 			arena_frase = "ELE NEM SENTIU • TENTE MAIS FORTE"
 			sons.play("torcida_desdenho", -1.0)
+		if ultimo:
+			_fechar_desfecho()
 	# O BAQUE TEM DUAS CAMADAS AGORA: o couro do impacto e o corpo que
 	# leva. Sem a segunda, o soco continuava soando como saco de areia
 	# mesmo com um lutador na tela levando o golpe.
@@ -2170,6 +2222,58 @@ func _registrar_impacto(
 	# no Top 20 sozinho — dois socos da mesma pessoa disputando duas linhas
 	# da tabela, e a estatística contando duas partidas onde houve uma.
 	# Agora é `_fechar_rodada`, uma vez por rodada, com a nota final.
+
+## O FIM DA RODADA NA ARENA: quem ganhou, e como a torcida reage.
+##
+##   NOCAUTE ou VITÓRIA (melhor soco >= 6500): o ginásio pega fogo — a
+##   plateia pula no fundo, festa longa no som.
+##   DERROTA (melhor soco < 4000): o lutador tira onda, e demora — a
+##   torcida vaia quem bateu enquanto ele comemora.
+##   EMPATE: ele comemora ter aguentado, a torcida aplaude.
+func _fechar_desfecho() -> void:
+	var melhor := 0
+	for soco in socos:
+		melhor = maxi(melhor, int(soco["pontos"]))
+	if _nocaute_na_rodada:
+		desfecho = "nocaute"
+	elif melhor >= 6500:
+		desfecho = "vitoria"
+	elif melhor < 4000:
+		desfecho = "derrota"
+	else:
+		desfecho = "empate"
+	if arena != null:
+		arena.fim_de_rodada(desfecho)
+	match desfecho:
+		"nocaute", "vitoria":
+			if arena != null:
+				arena.agitar(1.0, 7.5)
+			sons.play("torcida_festa", -3.0)
+		"derrota":
+			if arena != null:
+				arena.agitar(0.5, 8.0)
+			sons.play("torcida_vaia", -1.0)
+			sons.duck(12.0, 6.0)
+			arena_frase = ArenaFrases.de_derrota(plays)
+		_:
+			if arena != null:
+				arena.agitar(0.45, 4.0)
+			sons.play("arena_publico", -4.0)
+
+## QUANTO A ARENA FICA NO AR DEPOIS DO VEREDITO, antes da tabela.
+##
+## Era um número fixo e curto (1,15 s). Agora depende de como a rodada
+## acabou: a festa de quem ganhou e, sobretudo, o deboche de quem perdeu
+## precisam de tempo para acontecer — as vaias não cabem em um segundo.
+func _espera_do_ranking() -> float:
+	match desfecho:
+		"derrota":
+			return ESPERA_DO_RANKING_DEBOCHE
+		"nocaute", "vitoria":
+			return ESPERA_DO_RANKING_FESTA
+		"empate":
+			return ESPERA_DO_RANKING_EMPATE
+	return ESPERA_DO_RANKING
 
 func _disparar_veredito() -> void:
 	sons.stop("score_loop")
@@ -2216,6 +2320,234 @@ func _disparar_veredito() -> void:
 		for sound in ["win", "medium", "lose", "legendary"]:
 			sons.stop(sound)
 		sons.play("record", -2.0)
+
+# ======================================================================
+# O ENSAIO GERAL
+# ======================================================================
+## NADA ACONTECE PELA PRIMEIRA VEZ NA FRENTE DO JOGADOR.
+##
+## Numa TV Box o que engasga não é o desenho de sempre, é o desenho
+## NOVO: a primeira vez que um tipo de traço, uma cor de letreiro com
+## contorno, o círculo do placar, o anúncio "NOVO CAMPEÃO", a tabela do
+## Top 20, a rachadura ou o confete aparecem, o driver compila o shader e
+## sobe a textura naquele quadro — e o quadro trava. Era exatamente o
+## travamento da primeira rodada do dia.
+##
+## Enquanto o carregador cobre a tela, o jogo ENSAIA: um quadro por
+## cena, desenhando cada tela pesada com dados de mentira (os oito níveis,
+## o ranking em várias posições, a espera com a rachadura, a contagem, a
+## abertura), e dispara uma vez cada efeito de partícula. Tudo o que é
+## trocado para o ensaio é guardado antes e devolvido depois, no mesmo
+## quadro — o estado real do jogo nunca muda.
+const ENSAIO_QUADROS := 30
+const ENSAIO_NOTAS := [900, 2600, 5100, 7050, 8420, 9310, 9820, 9999]
+const ENSAIO_POSICOES := [1, 2, 3, 6, 11, 17, 20, 0]
+const ENSAIO_SALVA := [
+	"state", "result_score", "displayed_score", "verdict_time", "result_time",
+	"posicao_no_ranking", "ranking_announced", "ranking_started_at", "pancada_tempo",
+	"pancada_nivel", "pancada_forca", "socos", "clarao", "tremor", "_rachadura",
+	"_rachadura_t", "_cambaleio_t", "countdown_left", "pose_finished", "desfecho",
+	"arena_frase", "zoom_impacto", "ranking", "ultimo_soco_em",
+]
+var _ensaio := -1
+var _ensaio_ranking: Array[Dictionary] = []
+
+func _encerrar_ensaio() -> void:
+	if _ensaio < 0:
+		return
+	_ensaio = -1
+	fx.limpar()
+	queue_redraw()
+
+func _draw_ensaio() -> void:
+	var guardado := {}
+	for nome in ENSAIO_SALVA:
+		var valor = get(nome)
+		guardado[nome] = valor.duplicate() if (valor is Array or valor is Dictionary) else valor
+	var i := _ensaio
+	if _ensaio_ranking.is_empty():
+		var lista: Array[Dictionary] = []
+		for k in 14:
+			lista.assign(RankingStore.insert(lista, 9400 - k * 530, "", "ENSAIO")["entries"])
+		_ensaio_ranking = lista
+	var nota: int = ENSAIO_NOTAS[i % ENSAIO_NOTAS.size()]
+	socos = [
+		{"pontos": nota, "velocidade": 5.0, "pico_g": 0.0, "duracao_ms": 0.0, "simulado": true},
+		{"pontos": maxi(1, nota - 1234), "velocidade": 4.0, "pico_g": 0.0, "duracao_ms": 0.0, "simulado": true},
+	]
+	ultimo_soco_em = animation_time - 0.1
+	if ranking.size() < 8:
+		ranking.assign(_ensaio_ranking)
+	fundo.visible = true
+	if i < 8:
+		# O resultado de cada nível: número, nome, cor e o círculo.
+		state = GameDef.State.RESULT
+		result_score = nota
+		displayed_score = float(nota)
+		verdict_time = 0.4
+		result_time = 1.0
+		pancada_nivel = ScoreTier.de(nota)
+		pancada_tempo = 0.12
+		pancada_forca = float(nota) / float(GameDef.SCORE_MAX)
+		clarao = 0.5
+		_draw_partida()
+		_draw_pancada()
+		_draw_clarao()
+		if i == 0:
+			var nivel := ScoreTier.de(9999)
+			ImpactDirector.golpe(fx, _alvo(), nivel, CORES_FESTA)
+			ImpactDirector.festa(fx, _alvo(), nivel, CORES_FESTA)
+	elif i < 16:
+		# O anúncio e a tabela, em várias posições e momentos.
+		state = GameDef.State.RESULT
+		posicao_no_ranking = ENSAIO_POSICOES[i - 8]
+		result_score = nota
+		ranking_announced = true
+		ranking_started_at = 0.0
+		verdict_time = [0.3, 1.0, 1.8, 2.3, 2.7, 3.2, 4.5, 2.0][i - 8]
+		_draw_ranking_reveal()
+		if i == 8:
+			fx.chuva_de_confete(1080.0, 30, CORES_FESTA, 1.0)
+			fx.confete(Vector2(540.0, 1880.0), 28, CORES_FESTA, 900.0)
+			fx.fogos(Vector2(540.0, 700.0), CORES_FESTA)
+	elif i < 20:
+		# A espera do soco, com a rachadura e a vista escurecendo.
+		state = GameDef.State.ARMED
+		if i == 16:
+			_montar_rachadura(ALVO_DO_SOCO)
+		_rachadura_t = 0.2
+		_cambaleio_t = 0.3
+		_draw_partida()
+		_draw_soco_na_tela()
+	elif i < 23:
+		state = GameDef.State.COUNTDOWN
+		countdown_left = 2.4
+		pose_finished = i == 22
+		_draw_partida()
+	else:
+		state = GameDef.State.IDLE
+		_draw_show_idle()
+	fx.desenhar(self)
+	for nome in guardado:
+		set(nome, guardado[nome])
+
+# ======================================================================
+# O SOCO NA TELA E O CAMBALEIO
+# ======================================================================
+## A luva do lutador "acertou" o vidro: som, tranco, rachadura e o
+## cambaleio sorteado.
+func _levar_soco_na_tela() -> void:
+	sons.play("hit", 2.0)
+	sons.play("subgrave", -2.0)
+	sons.play("arena_corpo", 0.0)
+	sons.duck(12.0, 1.4)
+	tremor = maxf(tremor, randf_range(24.0, 36.0))
+	clarao = maxf(clarao, 0.30)
+	var centro := ALVO_DO_SOCO + Vector2(randf_range(-140.0, 140.0), randf_range(-120.0, 80.0))
+	fx.faiscas(centro, 22, Paleta.CREME, 1100.0)
+	fx.onda(centro, 40.0, 520.0, Paleta.CREME, 10.0, 0.45)
+	_montar_rachadura(centro)
+	_montar_cambaleio()
+
+func _montar_cambaleio() -> void:
+	_cambaleio_t = 0.0
+	_cambaleio_dur = randf_range(1.3, 2.1)
+	# frequências, fases e amplitudes do balanço: x, y e giro
+	_cambaleio_onda = PackedFloat32Array([
+		randf_range(3.0, 5.5), randf() * TAU, randf_range(10.0, 22.0),
+		randf_range(2.2, 4.4), randf() * TAU, randf_range(6.0, 14.0),
+		randf_range(1.8, 3.6), randf() * TAU, randf_range(0.010, 0.028),
+	])
+	# as travadas: 2 a 4, em instantes e durações sorteados
+	_travadas.clear()
+	var t := randf_range(0.03, 0.10)
+	for i in randi_range(2, 4):
+		var dur := randf_range(0.045, 0.14)
+		_travadas.append({
+			"ini": t, "fim": t + dur,
+			"tranco": Vector2(randf_range(-22.0, 22.0), randf_range(-16.0, 16.0)),
+			"giro": randf_range(-0.03, 0.03),
+		})
+		t += dur + randf_range(0.10, 0.38)
+
+func _passo_do_cambaleio(passo: float) -> void:
+	if _cambaleio_t >= 0.0:
+		_cambaleio_t += passo
+		if _cambaleio_t > _cambaleio_dur:
+			_cambaleio_t = -1.0
+	if _rachadura_t >= 0.0:
+		_rachadura_t += passo
+		if _rachadura_t > 1.4:
+			_rachadura_t = -1.0
+
+func _travada_atual() -> Dictionary:
+	if _cambaleio_t < 0.0:
+		return {}
+	for tr in _travadas:
+		if _cambaleio_t >= float(tr["ini"]) and _cambaleio_t < float(tr["fim"]):
+			return tr
+	return {}
+
+func _travado() -> bool:
+	return not _travada_atual().is_empty()
+
+## (x, y, giro) do cambaleio neste quadro.
+func _desvio_do_cambaleio() -> Vector3:
+	if _cambaleio_t < 0.0 or _cambaleio_onda.size() < 9:
+		return Vector3.ZERO
+	var t := _cambaleio_t
+	var some := pow(1.0 - clampf(t / _cambaleio_dur, 0.0, 1.0), 1.6)
+	var o := _cambaleio_onda
+	var v := Vector3(
+		sin(t * o[0] * TAU * 0.5 + o[1]) * o[2],
+		sin(t * o[3] * TAU * 0.5 + o[4]) * o[5],
+		sin(t * o[6] * TAU * 0.5 + o[7]) * o[8]
+	) * some
+	var tr := _travada_atual()
+	if not tr.is_empty():
+		var tranco: Vector2 = tr["tranco"]
+		v += Vector3(tranco.x, tranco.y, float(tr["giro"])) * maxf(some, 0.35)
+	return v
+
+## A rachadura: galhos quebrados saindo do ponto do soco, sorteados.
+func _montar_rachadura(centro: Vector2) -> void:
+	_rachadura.clear()
+	_rachadura_t = 0.0
+	var galhos := randi_range(6, 9)
+	for i in galhos:
+		var ang := float(i) / float(galhos) * TAU + randf_range(-0.3, 0.3)
+		var p := centro
+		var linha := PackedVector2Array([p])
+		for k in randi_range(3, 6):
+			ang += randf_range(-0.45, 0.45)
+			p += Vector2.from_angle(ang) * randf_range(40.0, 110.0)
+			linha.append(p)
+			if randf() < 0.3:
+				var q := p + Vector2.from_angle(ang + randf_range(0.6, 1.2) * (1.0 if randf() < 0.5 else -1.0)) * randf_range(30.0, 70.0)
+				_rachadura.append(PackedVector2Array([p, q]))
+		_rachadura.append(linha)
+	# o anel quebrado em volta do impacto
+	var anel := PackedVector2Array()
+	var raio := randf_range(34.0, 52.0)
+	for k in 13:
+		anel.append(centro + Vector2.from_angle(float(k) / 12.0 * TAU) * raio * randf_range(0.8, 1.2))
+	_rachadura.append(anel)
+
+func _draw_soco_na_tela() -> void:
+	if _rachadura_t >= 0.0 and not _rachadura.is_empty():
+		var a := 1.0 - clampf((_rachadura_t - 0.5) / 0.9, 0.0, 1.0)
+		for linha in _rachadura:
+			draw_polyline(linha, Color(0.0, 0.0, 0.0, 0.35 * a), 6.0, true)
+			draw_polyline(linha, Color(1.0, 0.98, 0.95, 0.85 * a), 2.5, true)
+	if _cambaleio_t >= 0.0:
+		# a vista escurece nas bordas, avermelhada, e volta
+		var v := pow(1.0 - clampf(_cambaleio_t / _cambaleio_dur, 0.0, 1.0), 2.0) * 0.55
+		var cor := Color(0.35, 0.0, 0.02, v)
+		var borda := 150.0
+		draw_rect(Rect2(-40.0, -40.0, TELA.x + 80.0, borda), cor)
+		draw_rect(Rect2(-40.0, TELA.y - borda + 40.0, TELA.x + 80.0, borda), cor)
+		draw_rect(Rect2(-40.0, -40.0, borda, TELA.y + 80.0), cor)
+		draw_rect(Rect2(TELA.x - borda + 40.0, -40.0, borda, TELA.y + 80.0), cor)
 
 # ======================================================================
 # ASSISTENTE DE CALIBRAÇÃO
@@ -3507,23 +3839,34 @@ func _receber_hit(msg: Dictionary) -> void:
 	auto_escala.registrar(speed)
 	_processar_golpe(speed, false, pico, duracao)
 
+## O SORTEIO DA NOTA tem gerador próprio, semeado no arranque: não
+## depende de quantas vezes o resto do jogo chamou `randf()`.
+var _sorte_da_nota := RandomNumberGenerator.new()
+## As últimas notas dadas, para `ScoreCurve.variar` nunca repetir uma.
+var _notas_recentes: Array = []
+
 ## Sensor e teclado passam obrigatoriamente por esta única porta. Assim a
 ## régua mostrada na Central é a mesma que decide o resultado real.
 func _processar_golpe(
 	speed: float, simulado: bool, pico_g := 0.0, duracao_ms := 0.0
 ) -> void:
-	var pontos := ScoreCurve.points_from_speed(
+	var tabela := ScoreCurve.points_from_speed(
 		speed, hit_min_speed, hit_max_speed, score_contraste, score_dead_zone,
 		score_ref_speed
 	)
+	var pontos := tabela
 	# O teclado de manutenção conserva o 9999 para testar toda a cerimônia.
-	# No sensor real, só golpes que JÁ chegaram ao teto participam; um em
-	# mil recebe a perfeição e os demais ficam em 9998.
+	# No sensor real a nota passa pelo sorteio de `ScoreCurve.variar`
+	# (volátil, sem número fixo, parede nos 8000) e só quem encostou no
+	# teto da tabela concorre ao 9999.
 	if not simulado:
-		pontos = ScoreCurve.variar(pontos, randf(), randf(), randf())
+		pontos = ScoreCurve.variar(tabela, _sorte_da_nota, _notas_recentes)
 		pontos = ScoreCurve.aplicar_perfeito_raro(
-			pontos, randi_range(0, ScoreCurve.CHANCE_PERFEITA - 1)
+			tabela, pontos, _sorte_da_nota.randi_range(0, ScoreCurve.CHANCE_PERFEITA - 1)
 		)
+		_notas_recentes.push_front(pontos)
+		if _notas_recentes.size() > ScoreCurve.MEMORIA_DE_NOTAS:
+			_notas_recentes.resize(ScoreCurve.MEMORIA_DE_NOTAS)
 	ultima_velocidade = speed
 	ultima_nota = pontos
 	if pontos <= 0:
@@ -4437,6 +4780,9 @@ func _iniciar_transicao() -> void:
 	transicao = 0.0
 
 func _draw() -> void:
+	if _ensaio >= 0:
+		_draw_ensaio()
+		return
 	fundo.visible = true
 	moldura.visible = false
 	# Fora da tela de atração o letreiro não participa. Na própria abertura
@@ -4452,9 +4798,17 @@ func _draw() -> void:
 	_deslocamento = Vector2.ZERO
 	if tremor > 0.1:
 		_deslocamento = Vector2(randf_range(-tremor, tremor), randf_range(-tremor, tremor))
+	var cambaleio := _desvio_do_cambaleio()
+	_deslocamento += Vector2(cambaleio.x, cambaleio.y)
 	var escala := Vector2.ONE * zoom_impacto
 	var origem := _deslocamento + ALVO_DO_SOCO - ALVO_DO_SOCO * zoom_impacto
-	if tremor > 0.1 or zoom_impacto != 1.0:
+	if absf(cambaleio.z) > 0.0001:
+		# gira em volta do ponto do soco, e não do canto da tela
+		var m := Transform2D(cambaleio.z, escala, 0.0, ALVO_DO_SOCO + _deslocamento)
+		m = m * Transform2D(0.0, -ALVO_DO_SOCO)
+		draw_set_transform_matrix(m)
+		fx.seguir(m.origin, escala)
+	elif tremor > 0.1 or zoom_impacto != 1.0 or _deslocamento != Vector2.ZERO:
 		draw_set_transform(origem, 0.0, escala)
 		fx.seguir(origem, escala)
 	else:
@@ -4473,6 +4827,7 @@ func _draw() -> void:
 	fx.desenhar(self)
 	_draw_pancada()
 	_draw_clarao()
+	_draw_soco_na_tela()
 	_draw_alertas_graves()
 	_draw_transicao()
 	_draw_ok_segurado()

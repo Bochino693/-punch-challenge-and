@@ -1,30 +1,30 @@
 PUNCH CHALLENGE - LUTADOR 3D
 ============================
 
-O adversario agora e um boneco 3D de verdade (malha com volume e esqueleto),
-e nao mais desenhos 2D. A animacao (guarda, ginga, jab-direto, reacao ao
-golpe, nocaute e levantar) e feita pelo jogo em cima dos ossos.
+LUTADOR PRINCIPAL (build 77): O BOXEADOR
+  assets/lutador3d/boxeador.glb - um boxeador humano de verdade: corpo
+  atlético (MakeHuman/Anny, livre para uso comercial), pele pintada em
+  4096 px (poros, veias, cabelo degradê, barba por fazer, olhos),
+  calção de cetim vermelho com o cós LAZER SPORT e friso dourado, botas
+  de cano alto com cadarço, luvas esculpidas e 4 expressões no rosto
+  (deboche, dor, grito, apagado). Ver LICENCA_BOXEADOR.txt.
 
-LUTADOR PRINCIPAL (v76)
-  assets/lutador3d/barbaro.glb  -  o Barbaro do pacote "KayKit Adventurers"
-  (Kay Lousberg, licenca CC0: uso livre, inclusive comercial, ver
-  LICENCA_BARBARO_KAYKIT_CC0.txt). Humano, com textura e ANIMACOES
-  PROPRIAS: guarda de punhos, golpe recebido, queda, levantar da lona e
-  comemoracao. O jogo esconde as armas e poe as luvas vermelhas.
-  Se este arquivo for apagado, o jogo usa o lutador.glb abaixo.
+  A animação é feita pelo jogo (scripts/arena/lutador_boxeador.gd):
+    - PÉS PLANTADOS: um pé só sai do chão para dar um passo de verdade;
+      nada desliza na lona. Joelhos e cotovelos por IK.
+    - Ginga na ponta dos pés, sombra de boxe com combinações (jab,
+      direto, gancho, cruzado de baixo).
+    - Reações com mola: cabeça vai e volta, guarda abre, passos para
+      trás para segurar o peso; cambaleio com passos tortos; queda na
+      lona e levantar.
+    - Fim de rodada: se o jogador foi fraco ele tira onda por quase sete
+      segundos (braços para cima, dança, aponta e ri, bate no queixo,
+      mostra os bíceps) enquanto a torcida vaia. Se o jogador bateu bem,
+      fica zonzo; nocauteado, fica na lona com a torcida em festa.
+    - Quem demora para bater leva um soco na tela.
 
-MODELO RESERVA
-  assets/lutador3d/lutador.glb  (Vanguard da Mixamo, com textura, uso
-  livre em jogos), com luvas vermelhas colocadas pelo jogo.
-  Qualquer exportacao da Mixamo serve: o jogo mede sozinho para onde o
-  personagem olha e vira ele de frente para a camera.
+  Para regenerar o boxeador: python tools/gerar_boxeador.py
 
-PARA TROCAR POR OUTRO LUTADOR (ex.: um boxeador realista)
-  1. Entre em https://www.mixamo.com (gratis, conta Adobe).
-  2. Escolha um personagem (Characters). Nao precisa de animacao.
-  3. Download: Format FBX Binary ou glTF, Pose "T-pose", With Skin.
-  4. Se baixou FBX, abra no Blender e exporte como .glb (glTF Binary).
-  5. Substitua assets/lutador3d/lutador.glb pelo seu arquivo (mesmo nome).
-  6. Abra o projeto no Godot 4.6.1 uma vez e gere o APK normalmente.
-  O jogo usa o esqueleto "mixamorig" e anima sozinho: guarda, golpes e
-  nocaute continuam funcionando. As luvas vermelhas sao colocadas nas maos.
+MODELOS RESERVA (usados só se o boxeador faltar)
+  assets/lutador3d/barbaro.glb  (KayKit, CC0) e
+  assets/lutador3d/lutador.glb  (Vanguard da Mixamo).

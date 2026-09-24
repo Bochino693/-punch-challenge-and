@@ -32,6 +32,9 @@ const EXTRA := [
 	# na tela mas o ouvido continuava batendo num saco de areia.
 	"arena_corpo", "arena_queda", "arena_publico", "torcida_desdenho",
 	"torcida_recorde", "torcida_podio", "torcida_top10", "torcida_top20",
+	# A torcida longa do fim de rodada: vaia (o jogador perdeu e o
+	# lutador tira onda) e festa (o jogador ganhou, o ginásio pega fogo).
+	"torcida_vaia", "torcida_festa",
 	# Vozes especiais da rodada de dois golpes.
 	"not_supress", "good_player",
 ]

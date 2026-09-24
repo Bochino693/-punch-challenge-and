@@ -22,8 +22,11 @@ const PAPEIS_CONTINUOS := ["idle", "guard"]
 ## (`LutadorModelo3D`, o boneco 3D com esqueleto).
 const PAPEIS := [
 	"idle", "guard", "taunt_weak", "hit_light", "hit_medium", "hit_heavy",
-	"stagger", "knockout", "get_up", "celebra",
+	"stagger", "knockout", "get_up", "celebra", "deboche", "tonto", "soco_tela",
 ]
+## As festas de fim de rodada: duram até a rodada acabar (não voltam
+## sozinhas para a guarda).
+const PAPEIS_DE_FESTA := ["celebra", "deboche", "tonto"]
 const DURACAO := {
 	"taunt_weak": 1.20, "stagger": 1.30, "hit_heavy": 0.95,
 	"hit_medium": 0.70, "hit_light": 0.46,
@@ -59,6 +62,9 @@ var _sombra_em := 2.5
 var _fica_no_chao := false
 ## Aguentou os dois socos: quando a reação acabar, comemora com a torcida.
 var _vai_comemorar := false
+## QUAL festa: "celebra" (aguentou), "deboche" (o jogador foi fraco e ele
+## tira onda, longa) ou "tonto" (levou bem, mas ficou de pé, zonzo).
+var _festa := "celebra"
 
 
 
@@ -95,6 +101,7 @@ func preparar() -> void:
 	em_guarda = false
 	_fica_no_chao = false
 	_vai_comemorar = false
+	_festa = "celebra"
 	if _corpo != null:
 		_corpo.transform = Transform3D.IDENTITY
 	_papel = ""
@@ -104,7 +111,7 @@ func preparar() -> void:
 func guardar(ativo: bool) -> void:
 	em_guarda = ativo
 	# Nocauteado no fim fica na lona; comemorando, não volta à guarda.
-	if _caindo or _fica_no_chao or _papel == "celebra":
+	if _caindo or _fica_no_chao or _papel in PAPEIS_DE_FESTA:
 		return
 	_tocar("guard" if ativo else "idle")
 
@@ -191,12 +198,12 @@ func atualizar(delta: float) -> void:
 			queda = 0.0
 			dano = minf(dano, 0.72)
 			_tocar("guard" if em_guarda else "idle")
-	elif _tempo_reacao <= 0.0 and _vai_comemorar and _papel != "celebra":
+	elif _tempo_reacao <= 0.0 and _vai_comemorar and not (_papel in PAPEIS_DE_FESTA):
 		# Aguentou a rodada: braços para cima com a torcida.
-		_tocar("celebra")
-	elif _tempo_reacao <= 0.0 and not (_papel in PAPEIS_CONTINUOS) and _papel != "celebra":
+		_tocar(_festa)
+	elif _tempo_reacao <= 0.0 and not (_papel in PAPEIS_CONTINUOS) and not (_papel in PAPEIS_DE_FESTA):
 		_tocar("guard" if em_guarda else "idle")
-	elif _papel == "guard" and _tempo_reacao <= 0.0:
+	elif _papel == "guard" and _tempo_reacao <= 0.0 and _sombra_da_base():
 		# SOMBRA NA GUARDA: esperando o soco, ele não fica só balançando.
 		# De tempos em tempos solta um jab-direto no ar e volta à guarda —
 		# é a provocação que chama o soco.
@@ -209,6 +216,46 @@ func atualizar(delta: float) -> void:
 
 	_mover_o_corpo()
 	_pintar()
+
+
+## O FIM DA RODADA, dito pelo jogo: "derrota" (o jogador foi fraco),
+## "vitoria" (bateu bem e ele ficou de pé) ou "empate".
+func fim_de_rodada(desfecho: String) -> void:
+	match desfecho:
+		"derrota":
+			_festa = "deboche"
+		"vitoria":
+			_festa = "tonto"
+		_:
+			_festa = "celebra"
+	_vai_comemorar = true
+	if _papel in PAPEIS_DE_FESTA:
+		_tocar(_festa)
+
+
+## O SOCO NA TELA: quem espera demais leva um. O corpo que sabe fazer
+## isso sobrescreve; o padrão recusa.
+func soco_na_tela() -> bool:
+	return false
+
+
+## Verdadeiro UMA vez, no quadro em que a luva encosta na câmera.
+func tela_atingida() -> bool:
+	return false
+
+
+## Quanto a câmera avança (m) e desce para acompanhar o lutador.
+func camera_extra() -> Vector2:
+	return Vector2.ZERO
+
+
+## Onde está a câmera, em coordenadas do mundo da arena.
+var ponto_da_camera := Vector3(0.0, 1.4, 3.0)
+
+
+## O corpo antigo fazia sombra de boxe pela base; o boxeador tem a dele.
+func _sombra_da_base() -> bool:
+	return true
 
 
 func _tocar(papel: String) -> void:

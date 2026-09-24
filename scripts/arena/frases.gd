@@ -120,3 +120,16 @@ static func de_dano(dano: float) -> String:
 		if dano <= float(faixa["ate"]):
 			return str(faixa["texto"])
 	return str(DANOS[DANOS.size() - 1]["texto"])
+
+
+## QUANDO QUEM BATEU PERDEU: o lutador tira onda e a frase acompanha.
+const DERROTA := [
+	"ELE ESTÁ RINDO DE VOCÊ!",
+	"A TORCIDA VAIOU • REVANCHE?",
+	"FOI SÓ ISSO? ELE QUER MAIS",
+	"ELE DANÇOU NA SUA FRENTE",
+	"VAIA GERAL • BATA MAIS FORTE",
+]
+
+static func de_derrota(semente: int) -> String:
+	return str(DERROTA[posmod(semente, DERROTA.size())])
