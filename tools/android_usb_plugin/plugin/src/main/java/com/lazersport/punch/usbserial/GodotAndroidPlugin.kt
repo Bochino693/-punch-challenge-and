@@ -122,7 +122,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
             if (data == null) return
             val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastCameraFrameAt < frameIntervalMs) return
+            if (!quadroPedido || now - lastCameraFrameAt < frameIntervalMs) return
             val size = activeCamera?.getPreviewSize()
             val width = size?.width ?: UVC_WIDTH
             val height = size?.height ?: UVC_HEIGHT
@@ -501,7 +501,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
             camera.setPreviewCallbackWithBuffer { data, cam ->
                 if (data != null) {
                     val now = android.os.SystemClock.elapsedRealtime()
-                    if (now - lastCameraFrameAt >= frameIntervalMs && data.size >= largura * altura * 3 / 2) {
+                    if (quadroPedido && now - lastCameraFrameAt >= frameIntervalMs && data.size >= largura * altura * 3 / 2) {
                         entregarNv21(data, largura, altura, "SISTEMA_NV21", now)
                         cameraStatus = "CÂMERA AO VIVO — ${largura}x${altura}"
                     }
@@ -599,7 +599,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                 if (metodo.name == "onFrame" && args != null && args.isNotEmpty()) {
                     val buf = args[0] as? java.nio.ByteBuffer
                     val now = android.os.SystemClock.elapsedRealtime()
-                    if (buf != null && now - lastCameraFrameAt >= frameIntervalMs) {
+                    if (buf != null && quadroPedido && now - lastCameraFrameAt >= frameIntervalMs) {
                         val precisa = w * h * 3 / 2
                         if (buf.remaining() >= precisa) {
                             val bytes = cruDaUvc?.takeIf { it.size == precisa } ?: ByteArray(precisa).also { cruDaUvc = it }
@@ -747,6 +747,11 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     @UsedByGodot
     fun pollUvcFrame(): ByteArray {
         synchronized(cameraFrameLock) {
+            val agora = android.os.SystemClock.elapsedRealtime()
+            val intervalo = agora - ultimoPedido
+            ultimoPedido = agora
+            halfRes = intervalo > 180L
+            quadroPedido = true
             val frame = latestRgbaFrame
             if (frame != null) {
                 latestRgbaFrame = null
@@ -843,8 +848,14 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     //   • o jogo diz o ritmo (`setUvcFrameInterval`): rápido só na foto;
     //   • fora da foto a conversão é em MEIA resolução (4x menos trabalho);
     //   • três vetores reaproveitados, nenhum lixo por quadro.
-    @Volatile private var frameIntervalMs = UVC_MIN_FRAME_INTERVAL_MS
+    @Volatile private var frameIntervalMs = 60L
     @Volatile private var halfRes = false
+    // CONVERTE SÓ O QUE O JOGO VAI LER: cada leitura do jogo pede o
+    // próximo quadro. Se o jogo lê devagar (fora da hora da foto), a
+    // conversão sai em meia resolução. Funciona sem o jogo precisar
+    // chamar nada novo — as mesmas funções do plugin antigo.
+    @Volatile private var quadroPedido = true
+    @Volatile private var ultimoPedido = 0L
     private var cruDaUvc: ByteArray? = null
     private val poolRgba = arrayOfNulls<ByteArray>(3)
     private var entregueAoJogo: ByteArray? = null
@@ -879,6 +890,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     }
 
     private fun entregarNv21(nv21: ByteArray, width: Int, height: Int, formato: String, now: Long) {
+        quadroPedido = false
         val passo = if (halfRes) 2 else 1
         val w = width / passo
         val h = height / passo
@@ -1001,7 +1013,9 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         if (!portsInFlight.compareAndSet(false, true)) return
         serialWorker.execute {
             try {
-                cachedPorts = drivers().joinToString("\n") { key(it) }
+                val lista = drivers()
+                cachedDrivers = lista
+                cachedPorts = lista.joinToString("\n") { key(it) }
             } catch (t: Throwable) {
                 lastError = "falha ao listar USB: ${t.message ?: t.javaClass.simpleName}"
             } finally {
@@ -1018,27 +1032,40 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         return cachedPorts
     }
 
-    /** Pede a abertura e volta na hora; o resultado sai em `pollSerial`. */
+    /**
+     * Abre a porta NA HORA, como o plugin antigo (o jogo usa as mesmas
+     * chamadas com qualquer versão do plugin). O que era lento — enumerar
+     * a USB — agora vem da lista em cache, renovada em segundo plano.
+     */
     @UsedByGodot
     fun openPort(portKey: String, baud: Int): Boolean {
-        if (serialState == 1) return true
-        serialState = 1
         lastError = ""
-        serialWorker.execute { openPortNow(portKey, baud) }
-        return true
+        openPortNow(portKey, baud)
+        return serialState == 2
     }
+
+    @Volatile private var cachedDrivers: List<UsbSerialDriver> = emptyList()
 
     private fun openPortNow(portKey: String, baud: Int) {
         closePortNow()
         serialState = 1
         try {
-            val driver = drivers().firstOrNull { key(it) == portKey }
+            var driver = cachedDrivers.firstOrNull { key(it) == portKey }
+            if (driver == null && cachedDrivers.isEmpty()) {
+                // Primeira vez: ainda não há lista em cache.
+                val lista = drivers()
+                cachedDrivers = lista
+                cachedPorts = lista.joinToString("\n") { key(it) }
+                driver = lista.firstOrNull { key(it) == portKey }
+            }
             if (driver == null) {
                 serialState = 0
+                refreshPorts(true)
                 fail("dispositivo USB nao esta mais conectado")
                 return
             }
-            if (!usbManager.hasPermission(driver.device)) {
+            val drv: UsbSerialDriver = driver
+            if (!usbManager.hasPermission(drv.device)) {
                 val host = activity
                 serialState = 0
                 if (host == null) {
@@ -1048,7 +1075,7 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                 // UMA janela por aparelho e por execução — e nunca com outra
                 // janela de permissão já aberta.
                 val pedir = !usbPermissionPending() &&
-                    synchronized(lock) { serialPermissionRequested.add(driver.device.deviceId) }
+                    synchronized(lock) { serialPermissionRequested.add(drv.device.deviceId) }
                 if (pedir) {
                     ensurePermissionReceiver(host)
                     val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
@@ -1057,8 +1084,8 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                     host.runOnUiThread {
                         try {
                             usbManager.requestPermission(
-                                driver.device,
-                                PendingIntent.getBroadcast(host, driver.device.deviceId, intent, flags)
+                                drv.device,
+                                PendingIntent.getBroadcast(host, drv.device.deviceId, intent, flags)
                             )
                         } catch (_: Throwable) {
                             usbPermissionOpenSince = 0L
@@ -1068,14 +1095,14 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
                 fail("autorize o Arduino: marque a caixa da janela e toque OK (so na 1a vez)")
                 return
             }
-            synchronized(lock) { serialPermissionRequested.remove(driver.device.deviceId) }
-            val connection = usbManager.openDevice(driver.device)
+            synchronized(lock) { serialPermissionRequested.remove(drv.device.deviceId) }
+            val connection = usbManager.openDevice(drv.device)
             if (connection == null) {
                 serialState = 0
                 fail("Android recusou a abertura do dispositivo USB")
                 return
             }
-            val port = driver.ports.firstOrNull()
+            val port = drv.ports.firstOrNull()
             if (port == null) {
                 serialState = 0
                 fail("adaptador USB serial nao possui porta")
@@ -1122,11 +1149,10 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         return false
     }
 
-    /** Fecha em segundo plano: parar a thread de leitura pode demorar. */
     @UsedByGodot
     fun closePort() {
         serialState = 0
-        serialWorker.execute { closePortNow() }
+        closePortNow()
     }
 
     private fun closePortNow() {

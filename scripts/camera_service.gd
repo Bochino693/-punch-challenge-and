@@ -112,10 +112,38 @@ var _obturador_ate_ms := 0
 var _obturador_teve_vida := false
 var _obturador_foi_aberto := false
 
+## ADORMECIDA durante o carregamento: nada de USB, câmera ou janela do
+## Android até o jogo estar pronto (`acordar`). Uma janela aberta no meio
+## do carregamento pausava o jogo e a barra congelava.
+var adormecida := false
+var _ja_montada := false
+
+## O jogo voltou para a frente: confere já a permissão e a câmera.
+func ao_voltar() -> void:
+	_permissoes_conferidas_ms = 0
+	_uvc_proximo_religar_ms = mini(_uvc_proximo_religar_ms, Time.get_ticks_msec() + 1500)
+	_proxima_busca_ms = 0
+
+func acordar() -> void:
+	if not adormecida:
+		return
+	adormecida = false
+	_montar()
+
 func _ready() -> void:
+	set_process(true)
+	if adormecida:
+		return
+	_montar()
+
+func _montar() -> void:
+	if _ja_montada:
+		return
+	_ja_montada = true
 	_preparar_android_usb()
-	# A PERMISSÃO DA CÂMERA NÃO É PEDIDA AQUI. No Android ela entra na fila
-	# do Porteiro (depois do Arduino) — ver `_passo_das_permissoes`.
+	# No Android a permissão sai em `_passo_das_permissoes` (primeiro
+	# quadro). Este nó só é criado DEPOIS do carregamento — uma janela do
+	# Android no meio do carregamento pausava o jogo e a barra congelava.
 	if OS.get_name() != "Android":
 		_pedir_permissao_android()
 	_acordar_servidor()
@@ -145,52 +173,41 @@ const METODOS_DA_PONTE := [
 	"getSystemCameraCount", "getCameraReport",
 ]
 
-## Só no plugin novo (versão 2): ritmo e resolução dos quadros, saída.
-const METODOS_DA_PONTE_2 := ["setUvcFrameInterval", "setUvcHalfResolution", "shutdown"]
-var _versao_da_ponte := 1
-
 func _ponte_tem(metodo: String) -> bool:
-	if _android_bridge == null:
-		return false
-	return metodo in METODOS_DA_PONTE or (_versao_da_ponte >= 2 and metodo in METODOS_DA_PONTE_2)
+	return _android_bridge != null and metodo in METODOS_DA_PONTE
 
 # ------------------------------------------------------------------
 # A FILA DAS PERMISSÕES (Android)
 var _permissoes_ok := false
 var _permissoes_pedidas := false
 var _permissoes_conferidas_ms := 0
-const MARCA_DO_MICROFONE := "user://.microfone_pedido"
 
-## Devolve true quando a câmera já pode ser usada. Enquanto não pode, pede
-## a permissão — uma vez por execução, e só na vez da câmera.
+## A PERMISSÃO DA CÂMERA, SIMPLES: só CÂMERA (sem microfone), uma janela,
+## pedida uma vez assim que o jogo termina de carregar. Autorizada, a câmera
+## abre e não para mais.
+var _pedido_em_ms := 0
+
+func permissao_resolvida() -> bool:
+	if OS.get_name() != "Android" or _permissoes_ok:
+		return true
+	# Pedida e sem resposta há muito tempo: não segura o resto da máquina.
+	return _permissoes_pedidas and Time.get_ticks_msec() - _pedido_em_ms > 15000
+
 func _passo_das_permissoes(agora: int) -> bool:
 	if _permissoes_ok or OS.get_name() != "Android":
 		return true
 	if agora < _permissoes_conferidas_ms:
 		return false
-	_permissoes_conferidas_ms = agora + 1000
+	_permissoes_conferidas_ms = agora + 700
 	if OS.get_granted_permissions().has("android.permission.CAMERA"):
 		_permissoes_ok = true
-		status = "CÂMERA AUTORIZADA — PROCURANDO…"
-		# O caminho completo de abertura, igual ao do arranque de antes:
-		# câmera do sistema, webcam USB e CameraServer.
+		status = "CÂMERA AUTORIZADA — ABRINDO…"
 		if enabled:
 			iniciar_captura()
-		_requisitar_webcam_usb_android(true)
 		return true
-	if _permissoes_pedidas or not Porteiro.vez_da_camera():
-		status = "AGUARDANDO O ARDUINO PARA PEDIR A CÂMERA" if not _permissoes_pedidas else "AUTORIZE A CÂMERA NA JANELA DO ANDROID"
-		return false
-	_permissoes_pedidas = true
-	# O MICROFONE, UMA VEZ NA VIDA DO APARELHO, junto com a câmera numa
-	# janela só. Ele não grava nada: sem ele o Android esconde a caixa
-	# "sempre" na janela da webcam USB.
-	if not FileAccess.file_exists(MARCA_DO_MICROFONE):
-		var marca := FileAccess.open(MARCA_DO_MICROFONE, FileAccess.WRITE)
-		if marca != null:
-			marca.store_string("1")
-		OS.request_permissions()
-	else:
+	if not _permissoes_pedidas:
+		_permissoes_pedidas = true
+		_pedido_em_ms = agora
 		OS.request_permission("CAMERA")
 	status = "AUTORIZE A CÂMERA NA JANELA DO ANDROID"
 	return false
@@ -209,9 +226,6 @@ func _preparar_android_usb() -> void:
 	if OS.get_name() != "Android" or not Engine.has_singleton("PunchUsbSerial"):
 		return
 	_android_bridge = Engine.get_singleton("PunchUsbSerial")
-	if _android_bridge != null:
-		var v = _android_bridge.call("getApiVersion")
-		_versao_da_ponte = int(v) if v != null else 1
 	if _android_bridge != null and _ponte_tem("prepareAndroidKiosk"):
 		_android_bridge.call("prepareAndroidKiosk")
 
@@ -235,6 +249,11 @@ func _requisitar_webcam_usb_android(forcar := false) -> void:
 		return
 	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
 		return
+	# Com câmera do sistema (o caso das TV Boxes), a webcam não precisa de
+	# permissão USB nenhuma: só abrir. Pedir a USB aqui abria janelas à toa.
+	if _ponte_tem_camera():
+		_android_bridge.call("startUvcCamera")
+		return
 	var agora := Time.get_ticks_msec()
 	if not forcar and agora < _proxima_permissao_usb_ms:
 		return
@@ -245,7 +264,7 @@ func _requisitar_webcam_usb_android(forcar := false) -> void:
 			status = resposta
 
 func _process(_delta: float) -> void:
-	if not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
+	if adormecida or not enabled or estado in [Estado.DESLIGADA, Estado.EXAME]:
 		return
 	var agora := Time.get_ticks_msec()
 	# Câmera ainda sem autorização: nada a abrir. (Autorizada, a câmera
