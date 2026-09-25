@@ -1,8 +1,14 @@
 SUPER BOXING (Punch Challenge) - BUILD 88
 =========================================
 
-GERAR O APK (um clique so)
---------------------------
+ATUALIZAR E GERAR O APK (um clique so)
+--------------------------------------
+Clique duas vezes em  ATUALIZAR_E_GERAR.bat : ele baixa a versao nova do
+GitHub (sem o erro "Your local changes would be overwritten") e ja gera o
+APK. Nao precisa mais digitar "git pull".
+
+GERAR O APK (sem baixar nada)
+-----------------------------
 1. Clique duas vezes em  GERAR_APK_AGORA.bat
 2. Espere. A janela mostra cada passo e NAO fecha sozinha:
    no fim aparece  SUCESSO  (ou  FALHA  com o motivo).
