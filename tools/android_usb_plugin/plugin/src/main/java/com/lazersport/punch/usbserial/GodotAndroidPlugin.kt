@@ -1010,6 +1010,18 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
         }
     }
 
+    /**
+     * O carregador pode INSISTIR na permissão do Arduino: sem isto o plugin
+     * pede uma vez por execução e depois só responde "autorize". Chamado só
+     * pelo carregador, quando a janela anterior foi fechada sem permitir —
+     * o jogo em si nunca abre janela de novo.
+     */
+    @UsedByGodot
+    fun allowPermissionRetry() {
+        synchronized(lock) { serialPermissionRequested.clear() }
+        usbPermissionOpenSince = 0L
+    }
+
     /** Verdadeiro enquanto a janela de permissão USB está aberta (até 60 s). */
     @UsedByGodot
     fun usbPermissionPending(): Boolean {

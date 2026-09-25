@@ -1,4 +1,4 @@
-SUPER BOXING (Punch Challenge) - BUILD 88
+SUPER BOXING (Punch Challenge) - BUILD 89
 =========================================
 
 ATUALIZAR E GERAR O APK (um clique so)
@@ -32,7 +32,9 @@ PRIMEIRA VEZ NA TV BOX
 ----------------------
 As permissoes vem LOGO NO INICIO, antes da barra andar, uma de cada vez:
   1. CAMERA   -> Permitir
-  2. ARDUINO  -> marque a caixa e toque OK (so na primeira vez)
+  2. ARDUINO  -> MARQUE "USAR POR PADRAO" e toque OK. Marcado, o Android
+                grava e nao pergunta mais. Sem permitir, o jogo pergunta
+                de novo (o Arduino e obrigatorio).
   3. WEBCAM USB -> so aparece se o Android pedir; marque a caixa e OK
 Depois disso a barra carrega e o jogo NAO abre mais nenhuma janela.
 A camera abre sozinha e se religa se parar. O jogo tenta os dois caminhos

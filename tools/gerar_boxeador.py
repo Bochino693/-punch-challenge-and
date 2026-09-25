@@ -61,16 +61,20 @@ def corpo() -> dict:
 
     m = anny.Anny(rig="makehuman", local_changes="all", facial_actions="all").to(dtype=torch.float32)
     pose = torch.eye(4)[None, None].repeat(1, m.bone_count, 1, 1)
-    fenotipo = dict(gender=1.0, age=0.46, muscle=0.92, weight=0.62, height=0.62, proportions=0.95)
+    # O CAMPEÃO DE ANIME: jovem, peito largo, ombros e braços grandes,
+    # cintura fina (o "V" do boxeador), barriga trincada.
+    fenotipo = dict(gender=1.0, age=0.40, muscle=1.0, weight=0.66, height=0.62, proportions=1.0)
     local = {
-        "torso-muscle-pectoral-incr": 0.55, "torso-muscle-dorsi-incr": 0.55,
-        "torso-vshape-incr": 0.5, "measure-shoulder-dist-incr": 0.25,
-        "l-upperarm-muscle-incr": 0.5, "r-upperarm-muscle-incr": 0.5,
-        "l-upperarm-shoulder-muscle-incr": 0.6, "r-upperarm-shoulder-muscle-incr": 0.6,
-        "l-lowerarm-muscle-incr": 0.45, "r-lowerarm-muscle-incr": 0.45,
-        "l-upperleg-muscle-incr": 0.4, "r-upperleg-muscle-incr": 0.4,
-        "l-lowerleg-muscle-incr": 0.4, "r-lowerleg-muscle-incr": 0.4,
-        "measure-neck-circ-incr": 0.6, "stomach-tone-incr": 0.2,
+        "torso-muscle-pectoral-incr": 1.0, "torso-muscle-dorsi-incr": 1.0,
+        "torso-vshape-incr": 1.0, "measure-shoulder-dist-incr": 0.55,
+        "l-upperarm-muscle-incr": 1.0, "r-upperarm-muscle-incr": 1.0,
+        "l-upperarm-shoulder-muscle-incr": 1.0, "r-upperarm-shoulder-muscle-incr": 1.0,
+        "l-lowerarm-muscle-incr": 0.9, "r-lowerarm-muscle-incr": 0.9,
+        "measure-upperarm-circ-incr": 0.35,
+        "l-upperleg-muscle-incr": 0.7, "r-upperleg-muscle-incr": 0.7,
+        "l-lowerleg-muscle-incr": 0.6, "r-lowerleg-muscle-incr": 0.6,
+        "measure-neck-circ-incr": 0.8, "stomach-tone-incr": 0.9,
+        "measure-waist-circ-incr": -0.35, "measure-frontchest-dist-incr": 0.3,
     }
     local = {k: v for k, v in local.items() if k in m.local_change_labels}
     def rosto(acoes):
@@ -349,7 +353,7 @@ def friso(cv, ci, nrm, jj, ww, pos, r, v0):
                 # a faixa desce da bainha, abrindo um pouco (a barra do cetim)
                 P.append(p_ - eixo * h + fora * (0.0015 + h * 0.25))
                 N.append(fora)
-                C.append([0.88, 0.62, 0.12])
+                C.append([0.78, 0.05, 0.09])
                 J.append(jj[k])
                 W.append(ww[k])
         F += [[base, base + 2, base + 1], [base + 1, base + 2, base + 3]]
@@ -442,6 +446,90 @@ def _malha_do_campo(campo, minimo, maximo, res):
     return verts.astype(np.float64), faces[:, ::-1].astype(np.uint32), (-nrm).astype(np.float64)
 
 
+# -------------------------------------------------------------- cabelo
+def cabelo(v, n, f, w, pontos, semente=7):
+    """CABELO ESPETADO DE ANIME, de verdade (malha, não pintura).
+
+    Uma casca fina colada ao couro cabeludo e ~50 mechas em cone saindo
+    dele: para cima e para trás no alto da cabeça, e a franja caindo para
+    a frente sobre a testa — o penteado do boxeador de mangá. Tudo num
+    campo de distância só, fechado por marching cubes (sem emendas)."""
+    from scipy.spatial import cKDTree
+    rng_ = np.random.default_rng(semente)
+    I = NOMES.index
+    cab_c = np.asarray(pontos["centro_cabeca"], np.float64)
+    testa_y = float(pontos["testa_y"])
+    orelha = np.asarray(pontos["orelha"], np.float64)
+    rel = v - cab_c
+    fa = np.cos(np.arctan2(rel[:, 0], rel[:, 2]))  # 1 = frente
+    linha = np.where(fa > 0, testa_y - (1 - fa) ** 1.4 * 0.036,
+                     testa_y - 0.036 - np.clip(-fa, 0, 1) ** 0.8 * 0.07)
+    perto_orelha = np.minimum(np.linalg.norm(v - orelha, axis=1),
+                              np.linalg.norm(v - orelha * [-1, 1, 1], axis=1)) < 0.036
+    couro = (w[:, I("Head")] > 0.6) & (v[:, 1] > linha) & ~perto_orelha
+    pts = v[couro].astype(np.float64)
+    nrm = n[couro].astype(np.float64)
+    # A CASCA PRECISA DE PONTOS DENSOS: os vértices do corpo ficam a 1–2 cm
+    # uns dos outros, e a casca de 1 cm saía em bolinhas, com o cabelo
+    # pintado aparecendo entre elas. Cada triângulo do couro cabeludo é
+    # salpicado de pontos.
+    tri = f[couro[f].all(1)]
+    amostras = [pts]
+    for _ in range(24):
+        b = rng_.dirichlet([1.0, 1.0, 1.0], len(tri))
+        amostras.append((v[tri] * b[:, :, None]).sum(1))
+    denso = np.concatenate(amostras)
+    arvore = cKDTree(denso)
+    # sementes das mechas: amostragem espalhada (a mais longe primeiro)
+    escolha = [int(np.argmax(pts[:, 1]))]
+    dist = np.linalg.norm(pts - pts[escolha[0]], axis=1)
+    for _ in range(40):
+        k = int(np.argmax(dist))
+        escolha.append(k)
+        dist = np.minimum(dist, np.linalg.norm(pts - pts[k], axis=1))
+    mechas = []
+    for k in escolha:
+        p0, n0 = pts[k], nrm[k] / max(np.linalg.norm(nrm[k]), 1e-6)
+        r0 = p0 - cab_c
+        frente = np.cos(np.arctan2(r0[0], r0[2]))
+        if frente > 0.5 and p0[1] < testa_y + 0.05:
+            # FRANJA: mechas grossas saindo para a frente e caindo sobre a
+            # testa (sem furar a pele)
+            dirc = n0 * 0.6 + np.array([rng_.normal(0, 0.15), -0.55, 0.65])
+            comp = rng_.uniform(0.05, 0.075)
+            raio = rng_.uniform(0.022, 0.028)
+        else:
+            # o resto PENTEADO PARA TRÁS e para cima, em chamas
+            dirc = n0 * 0.8 + np.array([0.0, 0.35, -0.55]) + rng_.normal(0, 0.12, 3)
+            comp = rng_.uniform(0.07, 0.12)
+            raio = rng_.uniform(0.026, 0.034)
+        dirc /= np.linalg.norm(dirc)
+        base = p0 + n0 * 0.006
+        mechas.append((base, base + dirc * comp, raio))
+    lo = pts.min(0) - 0.13
+    hi = pts.max(0) + 0.13
+
+    def campo(P):
+        forma = P.shape[:-1]
+        Q = P.reshape(-1, 3)
+        d, _ = arvore.query(Q, k=1)
+        casca = d - 0.013
+        for a_, b_, r_ in mechas:
+            casca = _uniao(casca, _sd_cone_redondo(Q, a_, b_, r_, 0.002), 0.02)
+        return casca.reshape(forma)
+
+    loc, faces, nrm_m = _malha_do_campo(campo, lo, hi, 0.0045)
+    # preto azulado, com as pontas e o alto mais claros (brilho de mangá)
+    alt = np.clip((loc[:, 1] - testa_y) / 0.14, 0, 1)
+    cor = np.tile(np.array([0.035, 0.035, 0.05], np.float32), (len(loc), 1))
+    cor += (alt[:, None] * np.array([0.05, 0.06, 0.12])).astype(np.float32)
+    # O sentido dos triângulos sai invertido em relação às luvas (lá a base
+    # de rotação da mão desvira): sem isto só a face de DENTRO da casca era
+    # desenhada — o topo da cabeça ficava careca e as mechas só por trás.
+    faces = faces[:, ::-1].copy()
+    return loc.astype(np.float32), faces, nrm_m.astype(np.float32), cor.astype(np.float32)
+
+
 # --------------------------------------------------------------- luvas
 def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
     """Luva de boxe de verdade: corpo acolchoado, dorso, polegar colado,
@@ -464,7 +552,8 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
         punho = _sd_elipsoide(P, A(0.0, -0.002, 0.150), A(0.060, 0.053, 0.052))
         dorso = _sd_elipsoide(P, A(0.0, -0.026, 0.112), A(0.056, 0.036, 0.084))
         polegar = _sd_cone_redondo(P, A(0.052, 0.020, 0.050), A(0.047, 0.030, 0.128), 0.0215 * s, 0.019 * s)
-        cano = _sd_cone_redondo(P, A(0.0, 0.0, -0.080), A(0.0, 0.0, 0.026), 0.044 * s, 0.048 * s)
+        # o cano afina para o cotovelo: abraça o antebraço (sem boca larga)
+        cano = _sd_cone_redondo(P, A(0.0, 0.0, -0.080), A(0.0, 0.0, 0.026), 0.039 * s, 0.048 * s)
         faixa = _sd_cone_redondo(P, A(0.0, 0.0, -0.052), A(0.0, 0.0, -0.022), 0.0475 * s, 0.0485 * s)
         d = _uniao(corpo, punho, 0.03 * s)
         d = _uniao(d, dorso, 0.025 * s)
@@ -474,7 +563,7 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
         # passava da caixa da malha e o punho saía aberto — de lado dava
         # para ver a luva por dentro, oca.
         corte = -(P[..., 2] + 0.092 * s)
-        return -_uniao(-np.minimum(d, faixa), -corte, 0.008 * s)
+        return -_uniao(-np.minimum(d, faixa), -corte, 0.014 * s)
 
     loc, faces, nrm = _malha_do_campo(campo, A(-0.085, -0.085, -0.10), A(0.085, 0.085, 0.215), 0.0058 * s)
     z = loc[:, 2] / s
@@ -792,9 +881,11 @@ def placa_do_cinturao(cp, cintura, pesos_de):
     z_frente = float(frente[:, 2].max())
     zona = cp[np.abs(cp[:, 1] - y_meio) < 0.02]
     centro_z = float((zona[:, 2].max() + zona[:, 2].min()) * 0.5)
-    raio = z_frente - centro_z + 0.010
-    meia_l, meia_a = 0.105, 0.070
-    esp = 0.012
+    # colada no cinto: pouco saliente, com a borda descendo para dentro
+    # da tira (de lado não aparece vão nem casca oca).
+    raio = z_frente - centro_z + 0.005
+    meia_l, meia_a = 0.094, 0.064
+    esp = 0.020
     aneis, lados = 14, 72
     P, UV = [], []
 
@@ -840,6 +931,13 @@ def placa_do_cinturao(cp, cintura, pesos_de):
     for k in range(lados):
         k1 = (k + 1) % lados
         F += [[ult + k, base_aro + k, base_aro + k1], [ult + k, base_aro + k1, ult + k1]]
+    # tampa de trás: a placa é uma peça FECHADA
+    centro_tras = len(P)
+    P.append(ponto(0.0, 0.0, esp))
+    UV.append([0.5, 0.5])
+    for k in range(lados):
+        k1 = (k + 1) % lados
+        F.append([centro_tras, base_aro + k1, base_aro + k])
     P = np.array(P, np.float32)
     F = np.array(F, np.uint32)
     # frente virada para fora: confere o sentido pelo primeiro triângulo
@@ -1228,6 +1326,8 @@ def construir(pintar=True):
     mat_cinto = glb.material(name="Cinturao", pbrMetallicRoughness={
         "baseColorTexture": {"index": glb.imagem(textura_do_cinturao(), "JPEG")},
         "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.15, "roughnessFactor": 0.40})
+    mat_cabelo = glb.material(name="Cabelo", pbrMetallicRoughness={
+        "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 0.55})
     mat_placa = glb.material(name="Placa", pbrMetallicRoughness={
         "baseColorTexture": {"index": glb.imagem(textura_da_placa(), "JPEG")},
         "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.35, "roughnessFactor": 0.22})
@@ -1326,6 +1426,14 @@ def construir(pintar=True):
     jj = np.zeros((len(dv), 4), np.uint16); jj[:, 0] = k
     ww = np.zeros((len(dv), 4), np.float32); ww[:, 0] = 1
     malhas.append(("Dentes", glb.malha("Dentes", dv, dn, df_, mat_luva, cor=dc, juntas=jj, pesos=ww)))
+
+    # ---- cabelo espetado, preso à cabeça
+    hv, hf, hn, hc = cabelo(v, n, f, w, ctx_pontos)
+    print("cabelo:", len(hv), "vértices")
+    k = NOMES.index("Head")
+    jj = np.zeros((len(hv), 4), np.uint16); jj[:, 0] = k
+    ww = np.zeros((len(hv), 4), np.float32); ww[:, 0] = 1
+    malhas.append(("Cabelo", glb.malha("Cabelo", hv, hn, hf, mat_cabelo, cor=hc, juntas=jj, pesos=ww)))
 
     # ---- luvas
     for lado, s in (("Left", "L"), ("Right", "R")):
