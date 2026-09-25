@@ -53,8 +53,8 @@ const TEX_TORCIDA_CIMA := "res://assets/arena/torcida_cima.png"
 const SHADER_TORCIDA := """
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never;
-uniform sampler2D baixo : source_color, filter_linear_mipmap;
-uniform sampler2D cima : source_color, filter_linear_mipmap;
+uniform sampler2D baixo : source_color, filter_linear_mipmap, repeat_disable;
+uniform sampler2D cima : source_color, filter_linear_mipmap, repeat_disable;
 uniform float agito = 0.0;
 uniform float tempo = 0.0;
 uniform float acende = 1.0;
@@ -66,14 +66,22 @@ void fragment() {
 	float pulo = max(0.0, sin(tempo * (3.2 + r * 3.8 + agito * 3.0) + r * 6.2831));
 	uv.y += pulo * (0.018 + 0.030 * agito) * (0.6 + r * 0.4);
 	uv.x += sin(tempo * (1.2 + r) + r * 9.0) * 0.004 * vida;
+	// A coluna que pula NÃO pode ler fora da imagem: com a textura
+	// repetindo, a borda de baixo aparecia no alto da coluna — eram as
+	// FAIXAS BRANCAS atrás do ringue.
+	uv = clamp(uv, vec2(0.001), vec2(0.999));
 	vec4 a = texture(baixo, uv);
 	vec4 b = texture(cima, uv);
 	float ola = 0.5 + 0.5 * sin(UV.x * 7.0 - tempo * 1.7);
 	float braco = 0.5 + 0.5 * sin(tempo * (2.6 + r * 2.2) + r * 12.0);
 	float mao = step(0.5, braco * (0.35 + 0.65 * ola) + agito * 0.45) * step(0.30 - agito * 0.25, r);
 	vec4 c = mix(a, b, mao);
-	float celular = step(0.992, fract(sin(col * 12.9898 + floor(tempo * 2.5 + r * 7.0) * 3.7) * 43758.5)) * step(0.5, UV.y) * c.a;
-	ALBEDO = c.rgb * acende * (1.0 + agito * 0.35) + vec3(0.9, 0.95, 1.0) * celular * 1.5;
+	// O flash de celular é um PONTINHO na mão de alguém, e não a coluna
+	// inteira acesa (a coluna acesa também lia como faixa branca).
+	float celular = step(0.992, fract(sin(col * 12.9898 + floor(tempo * 2.5 + r * 7.0) * 3.7) * 43758.5)) * c.a;
+	vec2 celula = vec2(fract(uv.x * 72.0) - 0.5, (UV.y - 0.62) * 14.0);
+	celular *= 1.0 - smoothstep(0.05, 0.16, length(celula));
+	ALBEDO = c.rgb * acende * (1.0 + agito * 0.35) + vec3(0.9, 0.95, 1.0) * celular * 1.2;
 	ALPHA = c.a * (0.80 + 0.20 * agito);
 }
 """
@@ -166,7 +174,7 @@ func _montar_mundo() -> void:
 	camera.fov = 44.0
 	# Plano de corte bem perto: no soco na tela a luva chega a um palmo da
 	# lente, e com o corte longe ela aparecia oca, "transparente".
-	camera.near = 0.04
+	camera.near = 0.10
 	camera.far = 30.0
 	_mundo.add_child(camera)
 	_calcular_enquadramento()
@@ -271,7 +279,10 @@ func _montar_ringue() -> void:
 	# A borda do tablado: faixa escura sob a lona.
 	var tablado := BoxMesh.new()
 	tablado.size = Vector3(m * 2.0 + 0.12, 0.6, m * 2.0 + 0.12)
-	_peca(tablado, _material_solido(Color("120a12"), 0.8), Vector3(0.0, -0.302, 0.0))
+	# O topo do tablado fica 3 cm abaixo da lona (e não 2 mm): na TV Box a
+	# profundidade tem menos precisão e os dois planos colados "brigavam"
+	# — era o chão piscando embaixo dos pés do lutador.
+	_peca(tablado, _material_solido(Color("120a12"), 0.8), Vector3(0.0, -0.33, 0.0))
 
 	# Postes de trás: vermelho à esquerda, azul à direita, com protetor.
 	var poste := CylinderMesh.new()
@@ -567,7 +578,8 @@ func _montar_sombra() -> void:
 	_mat_sombra.albedo_texture = _mancha_redonda()
 	_mat_sombra.albedo_color = Color(0.0, 0.0, 0.02, 0.9)
 	_mat_sombra.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	_sombra = _peca(malha, _mat_sombra, Vector3(0.0, 0.002, 0.0))
+	# 1,5 cm acima da lona (2 mm piscava na TV Box, colado no chão).
+	_sombra = _peca(malha, _mat_sombra, Vector3(0.0, 0.015, 0.0))
 
 
 # -------------------------------------------------------- tamanho/MSAA
@@ -984,6 +996,6 @@ func _sombra_de_contato() -> void:
 		return
 	var desloc := lutador.deslocamento()
 	var caido := clampf(lutador.queda, 0.0, 1.0)
-	_sombra.position = Vector3(desloc.x, 0.002, desloc.z * 0.6)
+	_sombra.position = Vector3(desloc.x, 0.015, desloc.z * 0.6)
 	_sombra.scale = Vector3(lerpf(1.0, 1.5, caido), 1.0, lerpf(1.0, 1.3, caido))
 	_mat_sombra.albedo_color.a = lerpf(0.9, 0.6, caido)

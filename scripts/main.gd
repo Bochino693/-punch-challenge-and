@@ -494,7 +494,7 @@ var zoom_alvo := 1.0
 ## marca, com o alvo do jogo montado nela. Meio segundo, o tempo de a
 ## pessoa entender que a máquina avançou.
 var transicao := -1.0
-const TRANSICAO_DURACAO := 0.34
+const TRANSICAO_DURACAO := 0.62
 
 ## A TROCA ENTRE O PRIMEIRO E O SEGUNDO SOCO NÃO É CORTINA.
 ##
@@ -797,16 +797,16 @@ const SOCO_NA_TELA_PRIMEIRO := Vector2(6.5, 8.5)
 const SOCO_NA_TELA_DEPOIS := Vector2(7.5, 11.0)
 var _soco_na_tela_em := 7.0
 
-## A VIDA DO JOGADOR — é o TEMPO dele. Na espera do soco ela escorre aos
-## poucos, e cada soco que o lutador dá na tela arranca um pedaço. Zerou,
+## A VIDA DO JOGADOR — é o TEMPO dele. Ela só cai quando o lutador VEM
+## e acerta a tela (quem demora leva); parado na guarda ele não tira
+## nada. Zerou,
 ## o jogador é nocauteado: a luva final, "K.O.", a câmera vai ao chão e a
 ## rodada acaba em derrota (a ficha não volta). Enche de novo a cada rodada.
 var vida_jogador := 1.0
 var _vida_jogador_fantasma := 1.0
 var _jogador_nocauteado := false
 var _fim_por_nocaute := -1.0
-const VIDA_DRENO_POR_SEGUNDO := 1.0 / 45.0
-const DANO_DO_SOCO_NA_TELA := 0.15
+const DANO_DO_SOCO_NA_TELA := 0.25
 ## O CAMBALEIO depois do soco na tela: a câmera da arena balança e o
 ## balanço morre devagar, com uma rachadura no vidro do quadro. Tudo
 ## sorteado a cada vez (nunca sai igual) e sempre liso, sem travar.
@@ -1488,12 +1488,6 @@ func _processar_armado(delta: float) -> void:
 				_fim_por_nocaute = -1.0
 				_entrar_em_resultado(true)
 		return
-	# A VIDA ESCORRE enquanto ele não bate (ver `vida_jogador`).
-	if not golpe_registrado:
-		vida_jogador = maxf(0.0, vida_jogador - delta * VIDA_DRENO_POR_SEGUNDO)
-		if vida_jogador <= 0.0:
-			_nocaute_do_jogador()
-			return
 	espera_left -= delta
 	# QUEM DEMORA LEVA. De tempos em tempos o lutador avança e soca a
 	# câmera: é o jeito de a máquina dizer "vai, bate logo".
@@ -1673,7 +1667,8 @@ func _entrar_em_resultado(encerrar_rodada := false) -> void:
 		# o resultado do primeiro soco herdaria a colocação da rodada
 		# ANTERIOR e comemoraria um recorde que não aconteceu.
 		posicao_no_ranking = 0
-	sons.start_score_loop()
+	if not _perdeu_sem_soco():
+		sons.start_score_loop()
 	state = GameDef.State.RESULT
 	state_time = 0.0
 	result_time = 0.0
@@ -2610,6 +2605,14 @@ func _espera_do_ranking() -> float:
 func _disparar_veredito() -> void:
 	sons.stop("score_loop")
 	sons.music(-28.0)
+	if _perdeu_sem_soco():
+		# Sem soco não há nível para anunciar (o locutor dizia "fraco",
+		# como se um soco tivesse contado): só a derrota e a vaia.
+		verdict_time = 0.0
+		moldura.set_estado(LedFrame.RESULTADO, Paleta.VERMELHO)
+		fundo.matiz = Color(Paleta.VERMELHO, 0.10)
+		sons.play("torcida_vaia", -3.0)
+		return
 	## O momento em que a máquina diz quanto valeu o soco. Um por golpe.
 	verdict_time = 0.0
 	proximo_fogo = 0.0
@@ -2815,6 +2818,10 @@ func _draw_ensaio() -> void:
 # ======================================================================
 ## A luva do lutador "acertou" o vidro: som, tranco, rachadura e o
 ## cambaleio sorteado.
+## Perdeu por nocaute sem ter dado nenhum soco que valesse.
+func _perdeu_sem_soco() -> bool:
+	return _jogador_nocauteado and socos.is_empty()
+
 ## A vida do jogador acabou: o lutador vem para o soco final.
 func _nocaute_do_jogador() -> void:
 	if _jogador_nocauteado:
@@ -5252,7 +5259,10 @@ func _draw_transicao() -> void:
 	if transicao < 0.0:
 		return
 	var t := clampf(transicao / TRANSICAO_DURACAO, 0.0, 1.0)
-	var avanco := ease(t, 0.55)
+	# Rápida nas pontas e DEVAGAR NO MEIO: o logo para no centro o tempo
+	# de ser lido, e a faixa passa sem borrão.
+	var u := t * 2.0 - 1.0
+	var avanco := 0.5 + 0.5 * signf(u) * pow(absf(u), 2.4)
 	# A faixa é mais larga que a tela para cobrir o corte inteiro no meio
 	# do caminho; sem isso apareceria uma fresta do jogo antigo.
 	var largura := 1500.0
@@ -5264,7 +5274,13 @@ func _draw_transicao() -> void:
 		Vector2(x + largura * 0.5 - inclinacao, TELA.y + 20.0),
 		Vector2(x - largura * 0.5 - inclinacao, TELA.y + 20.0),
 	])
-	Traco.poligono(self, faixa, Color("b2106c"))
+	Traco.poligono(self, faixa, Color("1a0b33"))
+	# o miolo com a mesma luz magenta do jogo, de cima para baixo
+	var miolo := PackedVector2Array([
+		Vector2(x - largura * 0.30 + inclinacao, -20.0), Vector2(x + largura * 0.30 + inclinacao, -20.0),
+		Vector2(x + largura * 0.30 - inclinacao, TELA.y + 20.0), Vector2(x - largura * 0.30 - inclinacao, TELA.y + 20.0),
+	])
+	draw_polygon(miolo, PackedColorArray([Color("7a0f55"), Color("7a0f55"), Color("2a0d45"), Color("2a0d45")]))
 	# Um fio de ouro na borda de ataque: é ele que dá velocidade ao gesto.
 	draw_line(
 		Vector2(x + largura * 0.5 + inclinacao, -20.0),
@@ -5278,9 +5294,11 @@ func _draw_transicao() -> void:
 	)
 	# O alvo viaja montado na faixa. É a mesma marca do jogo, e é o que
 	# faz a cortina pertencer a ESTA máquina e não a qualquer uma.
+	# O LOGO DO JOGO viaja montado na faixa, nítido (versão do tamanho
+	# certo) — a cortina é desta máquina.
 	var centro := Vector2(x, TELA.y * 0.5)
-	if centro.x > -200.0 and centro.x < TELA.x + 200.0:
-		Icones.alvo(self, centro, 108.0, Paleta.AMBAR)
+	if centro.x > -400.0 and centro.x < TELA.x + 400.0:
+		ArcadeStage.imagem(self, ArcadeStage.LOGO, centro, 560.0)
 
 ## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
 ## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
@@ -5551,11 +5569,12 @@ func _draw_espera_do_soco() -> void:
 	# A PROVOCAÇÃO DA ARENA. Ela não repete a instrução de cima: a
 	# instrução diz o que fazer, esta diz por que vale a pena. É a voz do
 	# jogo, e é o que um cartaz de console antigo teria aqui.
-	_texto_cabendo(
-		ArenaFrases.de_espera(socos.size() + int(plays)), 1796.0, 38,
-		Paleta.AMBAR, LARGURA_UTIL
-	)
-	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1840.0, Paleta.TINTA_FRACA)
+	if not _jogador_nocauteado:
+		_texto_cabendo(
+			ArenaFrases.de_espera(socos.size() + int(plays)), 1796.0, 38,
+			Paleta.AMBAR, LARGURA_UTIL
+		)
+		_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1840.0, Paleta.TINTA_FRACA)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# Os dois socos ficam à vista DURANTE a espera: é enquanto se prepara
 	# para bater que saber o que o primeiro valeu muda alguma coisa. Na
@@ -5713,13 +5732,16 @@ func _draw_show_idle() -> void:
 	# diz o que está faltando, com o anel girando para provar que a
 	# máquina está trabalhando nisso e não travada.
 	var liberado := rodada_liberada()
-	_cartao(
-		Rect2(140, 1560, 800, 112), Color("d91283") if liberado else Color("2a1250"),
-		Color(Paleta.AMBAR if liberado else Paleta.CIANO, pulse), chegada, 3.0
-	)
+	# O START NO ESTILO DO PAINEL DE LUTA: placa inclinada com aro de ouro,
+	# acesa em magenta e respirando — a coisa mais visível da tela.
+	var botao := Rect2(150, 1552, 780, 124)
 	if liberado:
-		_texto("PRESSIONE START", 1635.0, 46, Color(Color.WHITE, chegada))
+		var chama := 0.55 + 0.45 * (0.5 + 0.5 * sin(animation_time * 3.2))
+		_placa_arcade(botao, Paleta.ROSA, chegada, chama)
+		_texto_arcade("PRESSIONE START", 1640.0, 62, Color(Color.WHITE, chegada), botao.size.x - 60.0, botao.position.x + 30.0)
 	else:
+		_placa_arcade(botao, Paleta.CIANO, chegada, 0.0)
+	if not liberado:
 		_texto("PREPARANDO O JOGO", 1608.0, 34, Color(Paleta.CIANO, chegada))
 		_texto(motivo_da_recusa(), 1652.0, 18, Color(Color.WHITE, 0.85 * chegada))
 		_carregando(Vector2(880.0, 1616.0), 22.0, Paleta.CIANO)
@@ -5752,7 +5774,7 @@ func _draw_placa_de_creditos(cor: Color, alpha: float) -> void:
 		bate = exp(-_placa_bateu * 5.0)
 		caixa = caixa.grow(10.0 * bate * absf(cos(_placa_bateu * 22.0)))
 		cor = cor.lerp(Paleta.AMBAR, bate)
-	_cartao(caixa, Color("0c0615", 0.92).lerp(Color("5a3a00"), 0.55 * bate), Color(cor, 0.9), alpha, 3.0 + 3.0 * bate)
+	_placa_arcade(caixa, Color(cor, 0.9), alpha, 0.5 * bate)
 	var meio_y := caixa.position.y + caixa.size.y * 0.5
 	if game_mode == "free":
 		_letreiro_centrado("JOGO LIVRE", meio_y + 15.0, 40, Color(cor, alpha))
@@ -5779,11 +5801,18 @@ func _draw_placa_de_creditos(cor: Color, alpha: float) -> void:
 func _capitulo_da_marca(alpha: float) -> void:
 	var flutuar := smoothstep(0.5, 1.3, state_time)
 	var centro := Vector2(540, 560 + sin(animation_time * 1.4) * 8 * flutuar)
-	_raios_do_escudo(centro, alpha)
+	# O BRILHO ATRÁS DO ESCUDO CHEGA DEVAGAR. Ele nascia aceso no quadro
+	# em que a entrada acabava — o logo parecia sumir e voltar com o efeito.
+	var brilho := alpha * smoothstep(0.5, 1.9, state_time)
+	_raios_do_escudo(centro, brilho)
 	# O ESCUDO É UM NÓ COM SHADER (brilho varrendo, pulso): aqui só se diz
 	# onde ele fica neste quadro. Ver `_posicionar_escudo`.
-	_escudo_pedido = {"centro": centro, "largura": 924.0, "alpha": alpha, "quadro": Engine.get_process_frames()}
-	_faiscas_do_escudo(centro, alpha)
+	_escudo_pedido = {"centro": centro, "largura": 924.0, "alpha": alpha,
+		"quadro": Engine.get_process_frames(), "vida": flutuar}
+	# E JÁ NESTE QUADRO: esperar o próximo `_process` deixava um quadro
+	# sem logo nenhum entre a entrada e a abertura (o "piscar").
+	_posicionar_escudo()
+	_faiscas_do_escudo(centro, brilho)
 	ArcadeStage.titulo(self, alpha, animation_time)
 	# O NOME É DESENHADO PELO NÓ DO SHADER, e não aqui. Ele continua no
 	# mesmo lugar, no mesmo corpo e com a mesma entrada esmaecida — o que
@@ -5860,12 +5889,14 @@ func _posicionar_escudo() -> void:
 		return
 	var largura: float = _escudo_pedido["largura"]
 	var altura := largura * float(ArcadeStage.LOGO.get_height()) / float(ArcadeStage.LOGO.get_width())
-	var respira := 1.0 + 0.028 * sin(animation_time * 2.2)
+	# O balanço também entra aos poucos (a entrada pousa o logo PARADO).
+	var vida: float = _escudo_pedido.get("vida", 1.0)
+	var respira := 1.0 + 0.028 * sin(animation_time * 2.2) * vida
 	_escudo.size = Vector2(largura, altura)
 	_escudo.pivot_offset = _escudo.size * 0.5
 	_escudo.position = (_escudo_pedido["centro"] as Vector2) - _escudo.size * 0.5
 	_escudo.scale = Vector2(respira, respira)
-	_escudo.rotation = sin(animation_time * 0.8) * 0.022
+	_escudo.rotation = sin(animation_time * 0.8) * 0.022 * vida
 	_escudo.modulate = Color(1, 1, 1, float(_escudo_pedido["alpha"]))
 
 func _nome_do_jogo(alpha: float) -> void:
@@ -5925,12 +5956,19 @@ func _draw_score_hero() -> void:
 
 	# A plaqueta: metade sobre a moldura, metade fora. É o que a faz
 	# parecer pregada no quadro em vez de flutuando embaixo dele.
-	_cartao(PLACA_DO_PLACAR, Color("140c21"), cor, 1.0, 4.0)
-	_placar(
-		"– – – –" if measuring else "%04d" % int(round(displayed_score)),
-		CENTRO_DO_PLACAR, cor if measuring else Color.WHITE, PLACAR_NA_ARENA
-	)
-	_draw_barra_de_pontuacao(progresso, progresso_contagem, cor, measuring)
+	if _perdeu_sem_soco():
+		# NOCAUTEADO SEM SOCAR: nada de placar "0000" (lia como um soco
+		# fraco contado). A plaqueta diz o que aconteceu.
+		_cartao(PLACA_DO_PLACAR, Color("140c21"), Paleta.VERMELHO, 1.0, 4.0)
+		_placar("K.O.", CENTRO_DO_PLACAR, Paleta.VERMELHO, PLACAR_NA_ARENA)
+		_apoio("NENHUM SOCO CONTADO", PLACA_DO_PLACAR.end.y - 18.0, Color.WHITE)
+	else:
+		_cartao(PLACA_DO_PLACAR, Color("140c21"), cor, 1.0, 4.0)
+		_placar(
+			"– – – –" if measuring else "%04d" % int(round(displayed_score)),
+			CENTRO_DO_PLACAR, cor if measuring else Color.WHITE, PLACAR_NA_ARENA
+		)
+		_draw_barra_de_pontuacao(progresso, progresso_contagem, cor, measuring)
 
 	if verdict_time >= 0.0:
 		# A FAIXA ESCURA DO VEREDITO. O nome do nível vem na cor do nível —
@@ -6098,13 +6136,14 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 		if esperando:
 			pulso = 0.62 + 0.38 * sin(animation_time * 4.4)
 
-		_cartao(
-			caixa,
-			Paleta.CARTAO if feito or esperando else Paleta.VAZIO,
-			Color(cor, pulso),
-			1.0,
-			3.0 if (esperando or eh_melhor) else 2.0
-		)
+		# O PAINEL DO SOCO no estilo do painel de luta: o que espera o soco
+		# ACENDE e pulsa; o melhor ganha a cor do nível.
+		var acesa := 0.0
+		if esperando:
+			acesa = 0.35 + 0.35 * (0.5 + 0.5 * sin(animation_time * 4.4))
+		elif eh_melhor:
+			acesa = 0.45
+		_placa_arcade(caixa, Color(cor, pulso), 1.0, acesa)
 		# TUDO AQUI DENTRO SE CENTRA NO CARTÃO, E NÃO NA TELA.
 		#
 		# `_letreiro_centrado` centra na LARGURA INTEIRA do visor — foi o
@@ -6377,8 +6416,13 @@ func _ranking_linha(i: int, y: float, entrada: float, e_do_jogador: bool, destaq
 
 ## O rodapé: a nota da rodada e o convite para jogar de novo.
 func _ranking_rodape() -> void:
-	_rotulo("SEU SOCO", 1428.0, Paleta.TINTA_FRACA)
-	_texto_arcade("%04d" % result_score, 1546.0, 100, ScoreTier.cor_de(result_score), LARGURA_UTIL)
+	if _perdeu_sem_soco():
+		# Nocauteado sem ter socado: não houve soco para mostrar.
+		_rotulo("VOCÊ FOI NOCAUTEADO", 1428.0, Paleta.TINTA_FRACA)
+		_texto_arcade("K.O.", 1546.0, 100, Paleta.VERMELHO, LARGURA_UTIL)
+	else:
+		_rotulo("SEU SOCO", 1428.0, Paleta.TINTA_FRACA)
+		_texto_arcade("%04d" % result_score, 1546.0, 100, ScoreTier.cor_de(result_score), LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
 	_marca_lateral(1770.0, 0.95, 104.0)
 
@@ -7793,6 +7837,41 @@ func _andamento(rect: Rect2, quanto: float, accent: Color) -> void:
 ## A peça padrão da tela: retângulo branco com sombra e borda. Todo painel
 ## do jogo passa por aqui, então a "altura" das peças é a mesma em toda
 ## parte — e mudar a sombra do jogo inteiro é mudar uma função.
+## A PLACA DO PAINEL DE LUTA: paralelogramo com aro de ouro, fundo
+## escuro em degradê, vidro no alto e a borda na cor pedida. É o MESMO
+## desenho das barras de vida — usado no START, nos painéis dos socos e na
+## placa de créditos, para a tela inteira falar uma língua só.
+## `acesa` (0..1) enche o fundo com a cor (o painel "chamando").
+func _placa_arcade(r: Rect2, cor: Color, alpha := 1.0, acesa := 0.0) -> void:
+	if alpha <= 0.01:
+		return
+	var inc := minf(22.0, r.size.y * 0.22)
+	var forma := func(g: float) -> PackedVector2Array:
+		return PackedVector2Array([
+			Vector2(r.position.x + inc - g, r.position.y - g), Vector2(r.end.x + g, r.position.y - g),
+			Vector2(r.end.x - inc + g, r.end.y + g), Vector2(r.position.x - g, r.end.y + g),
+		])
+	var ouro := ArenaQuadro.OURO
+	var ouro_e := ArenaQuadro.OURO_ESC
+	draw_colored_polygon(forma.call(12.0), Color(0, 0, 0, 0.45 * alpha))
+	draw_polygon(forma.call(6.0), PackedColorArray([
+		Color(ouro, alpha), Color(ouro, alpha), Color(ouro_e, alpha), Color(ouro_e, alpha)]))
+	var topo := Color("241440").lerp(cor, 0.55 * acesa)
+	var base := Color("0c0615").lerp(cor.darkened(0.45), 0.55 * acesa)
+	draw_polygon(forma.call(0.0), PackedColorArray([
+		Color(topo, alpha), Color(topo, alpha), Color(base, alpha), Color(base, alpha)]))
+	# vidro: faixa clara na metade de cima
+	var meio := r.position.y + r.size.y * 0.46
+	var d := inc * (meio - r.position.y) / r.size.y
+	draw_polygon(PackedVector2Array([
+		Vector2(r.position.x + inc, r.position.y), Vector2(r.end.x, r.position.y),
+		Vector2(r.end.x - d, meio), Vector2(r.position.x + inc - d, meio),
+	]), PackedColorArray([Color(1, 1, 1, 0.14 * alpha), Color(1, 1, 1, 0.05 * alpha),
+		Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.0)]))
+	var contorno: PackedVector2Array = forma.call(0.0)
+	contorno.append(contorno[0])
+	draw_polyline(contorno, Color(cor, 0.95 * alpha), 3.0, true)
+
 func _cartao(rect: Rect2, fundo_c: Color, borda: Color, alpha := 1.0, largura_borda := 2.0) -> void:
 	draw_rect(Rect2(rect.position + Vector2(0, 4.0), rect.size), Color(Paleta.SOMBRA, Paleta.SOMBRA.a * alpha))
 	draw_rect(rect, Color(fundo_c, fundo_c.a * alpha))

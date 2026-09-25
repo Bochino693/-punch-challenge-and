@@ -173,6 +173,7 @@ var _perm_t0 := 0.0
 var _saiu_foco := false
 var _voltou_foco := false
 var _perm_texto := "VERIFICANDO PERMISSÕES"
+var _arduino_tentativas := 0
 
 func _notification(what: int) -> void:
 	match what:
@@ -234,8 +235,19 @@ func _passo_do_arduino() -> void:
 	var plugin = Engine.get_singleton("PunchUsbSerial")
 	if _perm_pedido:
 		if _respondida():
-			Diario.marca("PERMISSOES: arduino respondido")
-			_proxima_permissao()
+			# O ARDUINO É A ALMA DO JOGO: sem ele não há ficha, START nem
+			# soco. Se a janela foi fechada sem permitir, pergunta DE NOVO
+			# (a próxima volta testa a porta e, sem permissão, reabre a
+			# janela). Só desiste se nenhuma janela chegou a aparecer.
+			var apareceu := _saiu_foco
+			Diario.marca("PERMISSOES: arduino respondido (janela %s)" % ("sim" if apareceu else "nao"))
+			_perm_pedido = false
+			_arduino_tentativas += 1
+			if not apareceu or _arduino_tentativas >= 12:
+				_proxima_permissao()
+				return
+			plugin.call("allowPermissionRetry")
+			_perm_t0 = _relogio
 		return
 	# A lista pode vir vazia no primeiro pedido (o plugin novo a monta em
 	# segundo plano): tenta por 3 s; sem Arduino ligado, segue.
@@ -259,7 +271,8 @@ func _passo_do_arduino() -> void:
 		_perm_t0 = _relogio
 		_saiu_foco = false
 		_voltou_foco = false
-		_perm_texto = "ARDUINO: MARQUE A CAIXA E TOQUE OK"
+		_perm_texto = "ARDUINO: MARQUE \"USAR POR PADRÃO\" E TOQUE OK" if _arduino_tentativas == 0 \
+			else "O JOGO PRECISA DO ARDUINO: MARQUE \"USAR POR PADRÃO\" E TOQUE OK"
 		Diario.marca("PERMISSOES: pedindo arduino")
 		return
 	Diario.marca("PERMISSOES: arduino erro (%s)" % erro)

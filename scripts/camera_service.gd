@@ -179,6 +179,15 @@ func _despertar_passo(agora: int) -> bool:
 				status = "CÂMERA DESATIVADA"
 			elif OS.get_name() != "Android":
 				iniciar_captura()
+			else:
+				# O ESTADO SAI DE "DESLIGADA" JÁ AQUI. A câmera nasce
+				# DESLIGADA, e o `_process` sai logo na primeira linha
+				# enquanto ela está assim — no Android ela só seria ligada
+				# DEPOIS (em `_passo_das_permissoes`), que nunca chegava a
+				# rodar. Era por isso que o plugin nem era consultado
+				# ("Câmera USB ainda não consultada").
+				estado = Estado.SUBINDO
+				status = "PROCURANDO CÂMERA…"
 			# No Android a abertura sai em `_passo_das_permissoes`, que só
 			# abre a câmera depois de confirmar a permissão.
 			_ja_montada = true
@@ -909,6 +918,14 @@ func procurar_de_novo() -> void:
 	_sessao_aprovada = false
 	estado = Estado.SUBINDO
 	status = "PROCURANDO CÂMERA USB…"
+	if OS.get_name() == "Android":
+		# Recomeça a caçada do zero, já pedindo ao plugin.
+		_registro("procurar de novo (Central)")
+		_caca = Caca.NENHUMA
+		_caca_desde_ms = 0
+		_uvc_teve_video = false
+		_uvc_proximo_religar_ms = 0
+		_permissoes_conferidas_ms = 0
 	_descobrir_cameras(true)
 
 func entregar_ao_exame() -> void:

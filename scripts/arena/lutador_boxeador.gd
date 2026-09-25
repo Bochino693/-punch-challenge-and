@@ -221,7 +221,7 @@ func montar() -> void:
 				continue
 			# Casca fina (calção, cinturão, friso): duas faces. Luvas e botas
 			# são sólidos fechados e ficam com uma.
-			var casca := mi.name in ["Calcao", "Cinturao", "Friso"]
+			var casca := mi.name in ["Calcao", "Cinturao", "Friso", "Placa"]
 			var chave := [base, casca]
 			if not feitos.has(chave):
 				var novo := base.duplicate() as StandardMaterial3D

@@ -161,9 +161,10 @@ def pintar_pele(ctx: dict, tam: int = 4096):
     frente_t = suave(0.10, 0.45, N[:, 2]) * (1 - CAB)
     cy = my + 0.028
     px = (ax - 0.080) / 0.102
-    py = (yy - cy) / np.where(yy > cy, 0.085, 0.038)
+    py = (yy - cy) / np.where(yy > cy, 0.085, 0.050)
     # placa larga e achatada (músculo, não volume redondo)
-    pec = np.clip(1 - (np.abs(px) ** 3 + np.abs(py) ** 2.2), 0, 1) ** 0.35 * 0.7
+    # borda de baixo MACIA (a borda seca virava uma linha, como cicatriz)
+    pec = np.clip(1 - (np.abs(px) ** 3 + np.abs(py) ** 2.2), 0, 1) ** 0.7 * 0.7
     esterno = np.exp(-(P[:, 0] / 0.011) ** 2) * suave(my - 0.09, my - 0.05, yy) * (1 - suave(my + 0.08, my + 0.12, yy))
     faixa_abd = suave(0.088, 0.062, ax) * suave(my - 0.34, my - 0.29, yy) * (1 - suave(my - 0.085, my - 0.055, yy))
     alba = np.exp(-(P[:, 0] / 0.0075) ** 2)
@@ -360,15 +361,21 @@ def pintar_roupa(ctx: dict, tam: int = 2048):
     del img
     cintura = r["cintura"]
 
-    # ---- calção de cetim vermelho: brilho em faixas de dobra.
+    # ---- CALÇÃO PRETO DE CETIM com faixas vermelha e branca na lateral
+    # (o calção do boxeador de mangá), cós preto sob o cinturão.
     dobra = fbm(P * [2.5, 0.5, 2.5], 18.0, 3, 40)
-    verm = np.tile(srgb("b3121f"), (P.shape[0], 1)) * (1.0 + dobra * 0.10)[:, None]
-    # cós largo dourado com o nome
+    roupa = np.tile(srgb("17141d"), (P.shape[0], 1)) * (1.0 + dobra * 0.18)[:, None]
     cos = suave(cintura - 0.062, cintura - 0.055, P[:, 1])
-    ouro = np.tile(srgb("e0a526"), (P.shape[0], 1)) * (1.0 + fbm(P, 60.0, 2, 41) * 0.08)[:, None]
-    roupa = mistura(verm, ouro, cos)
-    friso_cos = (1 - suave(0.002, 0.004, np.abs(P[:, 1] - (cintura - 0.058))))
-    roupa = mistura(roupa, srgb("f4f1ea"), friso_cos)
+    roupa = mistura(roupa, srgb("0d0b10"), cos)
+    perna = P[:, 1] < cintura - 0.066
+    # "para fora": a normal apontando para o lado de fora da perna
+    fora = N[:, 0] * np.sign(P[:, 0]) - N[:, 2] * 0.15
+    faixa_v = (1 - suave(0.0, 0.05, np.abs(fora - 0.80) - 0.16)) * perna
+    faixa_b = (1 - suave(0.0, 0.03, np.abs(fora - 0.54) - 0.06)) * perna
+    faixa_v2 = (1 - suave(0.0, 0.03, np.abs(fora - 0.40) - 0.05)) * perna
+    roupa = mistura(roupa, srgb("c3121f") * (1.0 + dobra * 0.12)[:, None], faixa_v)
+    roupa = mistura(roupa, srgb("f2f0ea"), faixa_b)
+    roupa = mistura(roupa, srgb("c3121f"), faixa_v2)
     letras = _letreiro("LAZER SPORT", ctx["fonte"])
     lx = (P[:, 0] + 0.15) / 0.30
     ly = 1.0 - (P[:, 1] - (cintura - 0.052)) / 0.050
@@ -376,11 +383,7 @@ def pintar_roupa(ctx: dict, tam: int = 2048):
     li = np.clip((ly * (letras.shape[0] - 1)).astype(int), 0, letras.shape[0] - 1)
     lj = np.clip((lx * (letras.shape[1] - 1)).astype(int), 0, letras.shape[1] - 1)
     tinta = np.where(dentro, letras[li, lj], 0.0) * cos
-    roupa = mistura(roupa, srgb("7a0710"), tinta)
-    # barra dourada e friso branco na lateral da perna
-    barra = np.zeros_like(COXA)
-    lateral = (1 - suave(0.012, 0.018, np.abs(N[:, 2]))) * (np.abs(N[:, 0]) > 0.5) * (P[:, 1] < cintura - 0.06)
-    roupa = mistura(roupa, srgb("f4f1ea"), lateral * (1 - barra))
+    roupa = mistura(roupa, srgb("c3121f"), tinta)
 
     # ---- botas pretas de couro, sola branca, cadarço branco.
     couro = np.tile(srgb("141417"), (P.shape[0], 1)) * (1.0 + fbm(P, 120.0, 3, 50) * 0.18)[:, None]
