@@ -250,16 +250,96 @@ func _passo_das_permissoes(agora: int) -> bool:
 ## Liga o CameraServer e escuta as câmeras que entram/saem. No Android só
 ## DEPOIS da permissão: ligar antes travava a TV Box na abertura.
 func _ligar_servidor() -> void:
-	# No Android o CameraServer do Godot NUNCA é ligado: quem abre a câmera
-	# é só o plugin (API clássica + UVC direta). Dois donos para a mesma
-	# webcam travavam a TV Box.
-	if OS.get_name() == "Android" or not _tem_permissao_da_camera():
+	# No Android o CameraServer só liga na vez dele da caçada (ver
+	# `_cacar_camera_android`) — nunca junto com o plugin: dois donos para
+	# a mesma webcam derrubam os dois.
+	if _servidor_proibido() or not _tem_permissao_da_camera():
 		return
 	_acordar_servidor()
 	if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
 		CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
 	if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
 		CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
+
+# ------------------------------------------------------------------
+# A CAÇADA DA CÂMERA NO ANDROID — dois caminhos, um de cada vez, sem parar.
+#
+# PONTE: o plugin (API clássica do Android; UVC direta pela USB de reserva).
+#   É o caminho quando o Android mostra a webcam como câmera "clássica".
+# SERVIDOR: o CameraServer do Godot (Camera2). Muitas TV Boxes só mostram
+#   a webcam USB ali, como "câmera externa" — era por ele que a câmera
+#   abria na build 80, e as builds seguintes o deixaram de fora.
+#
+# Começa pelo caminho que o próprio Android indica (câmera clássica → PONTE;
+# nenhuma → SERVIDOR). Sem imagem, troca para o outro, e assim por diante
+# até vir vídeo: a câmera sempre é encontrada, seja qual for a TV Box. A
+# troca só acontece na tela de espera, nunca na foto ou no soco. Cada troca
+# fica anotada no `Diario`.
+enum Caca { NENHUMA, PONTE, SERVIDOR }
+var _caca := Caca.NENHUMA
+var _caca_desde_ms := 0
+const CACA_PONTE_MS := 15000
+const CACA_SERVIDOR_MS := 12000
+
+func _servidor_proibido() -> bool:
+	return OS.get_name() == "Android" and _caca != Caca.SERVIDOR
+
+func _cacar_camera_android(agora: int) -> void:
+	if _android_bridge == null and _caca == Caca.NENHUMA:
+		_mudar_caca(Caca.SERVIDOR, agora, "sem plugin")
+		return
+	if _caca == Caca.NENHUMA:
+		# A contagem do plugin sai em segundo plano: dá 1,5 s para ela.
+		if _caca_desde_ms == 0:
+			_caca_desde_ms = agora
+		var classicas := int(_android_bridge.call("getSystemCameraCount")) if _ponte_tem("getSystemCameraCount") else 0
+		if classicas > 0:
+			_mudar_caca(Caca.PONTE, agora, "%d camera(s) classica(s)" % classicas)
+		elif agora - _caca_desde_ms >= 1500:
+			_mudar_caca(Caca.SERVIDOR, agora, "nenhuma camera classica")
+		return
+	if ao_vivo():
+		_caca_desde_ms = agora  # com vídeo, fica onde está
+		return
+	var paciencia := CACA_PONTE_MS if _caca == Caca.PONTE else CACA_SERVIDOR_MS
+	if agora - _caca_desde_ms < paciencia or not janelas_liberadas:
+		return
+	if _caca == Caca.PONTE:
+		_mudar_caca(Caca.SERVIDOR, agora, "plugin sem video")
+	elif _android_bridge != null:
+		_mudar_caca(Caca.PONTE, agora, "CameraServer sem video")
+	else:
+		_caca_desde_ms = agora
+
+func _mudar_caca(nova: Caca, agora: int, porque: String) -> void:
+	_caca = nova
+	_caca_desde_ms = agora
+	if nova == Caca.SERVIDOR:
+		Diario.marca("CAMERA: CameraServer (%s)" % porque)
+		# Solta a webcam do plugin antes: um dono de cada vez.
+		_parar_uvc_android()
+		_uvc_teve_video = false
+		_ligar_servidor()
+		Diario.marca("CAMERA: CameraServer ligado, %d camera(s)" % CameraServer.feeds().size())
+		_proxima_busca_ms = 0
+		status = "PROCURANDO A WEBCAM (CAMERA2)…"
+	else:
+		Diario.marca("CAMERA: plugin (%s)" % porque)
+		_parar_feed()
+		if CameraServer.has_method("set_monitoring_feeds"):
+			CameraServer.call("set_monitoring_feeds", false)
+		_uvc_parada = false
+		_uvc_proximo_religar_ms = 0
+		status = "PROCURANDO A WEBCAM (PLUGIN)…"
+
+## Sem câmera: o que o caminho da vez está dizendo, em uma linha.
+func _motivo_android() -> String:
+	if _caca == Caca.SERVIDOR:
+		var n := CameraServer.feeds().size()
+		return "CAMERA2: %s" % ("NENHUMA CÂMERA PUBLICADA" if n == 0 else "%d CÂMERA(S), ABRINDO…" % n)
+	if _android_bridge != null and _ponte_tem("getUvcStatus"):
+		return "PLUGIN: " + str(_android_bridge.call("getUvcStatus"))
+	return "NENHUMA CÂMERA USB ENCONTRADA"
 
 func _pedir_permissao_android() -> void:
 	if OS.get_name() != "Android":
@@ -291,14 +371,14 @@ func _ponte_tem_camera() -> bool:
 		and int(_android_bridge.call("getSystemCameraCount")) > 0
 
 func _servidor_tem_camera() -> bool:
-	if OS.get_name() == "Android":
+	if _servidor_proibido():
 		return false
 	return not CameraServer.feeds().is_empty()
 
 func _requisitar_webcam_usb_android(forcar := false) -> void:
 	if OS.get_name() != "Android" or _android_bridge == null:
 		return
-	if not _permissoes_ok or not Porteiro.livre():
+	if not _permissoes_ok or not Porteiro.livre() or _caca != Caca.PONTE:
 		return
 	if _feed != null or (_servidor_tem_camera() and not _ponte_tem_camera()):
 		return
@@ -340,7 +420,9 @@ func _process(_delta: float) -> void:
 	if _amostrar_uvc_android(agora):
 		return
 	if OS.get_name() == "Android":
-		return  # no Android a câmera é só do plugin
+		_cacar_camera_android(agora)
+		if _servidor_proibido():
+			return  # vez do plugin
 	# Mesmo com uma câmera aberta, continua observando a lista. Assim uma
 	# webcam USB conectada depois substitui automaticamente a integrada.
 	var hora_de_buscar := agora >= _proxima_busca_ms
@@ -360,7 +442,9 @@ func _process(_delta: float) -> void:
 	if agora < _proxima_amostra_ms:
 		return
 	var obturador_aberto := agora <= _obturador_ate_ms
-	_proxima_amostra_ms = agora + (INTERVALO_OBTURADOR_MS if obturador_aberto else INTERVALO_AMOSTRA_MS)
+	# Ler a imagem da CameraTexture é uma cópia da placa de vídeo: fora da
+	# foto, só de vez em quando (o mesmo ritmo da ponte), para não pesar.
+	_proxima_amostra_ms = agora + (INTERVALO_OBTURADOR_MS if obturador_aberto else maxi(INTERVALO_AMOSTRA_MS, intervalo_uvc_ms))
 	_amostrar_quadro()
 
 func iniciar_captura() -> void:
@@ -373,8 +457,8 @@ func iniciar_captura() -> void:
 func _vigiar_webcam_android(agora: int) -> void:
 	if OS.get_name() != "Android" or _android_bridge == null or not _ponte_tem("startUvcCamera"):
 		return
-	if _feed != null:
-		return  # quem cuida da câmera é o CameraServer
+	if _feed != null or _caca != Caca.PONTE:
+		return  # a vez é do CameraServer (ou ainda não se decidiu)
 	var paciencia := maxi(RELIGAR_SEM_QUADRO_MS, intervalo_uvc_ms * 2 + 1500)
 	if _uvc_quadro_ms > 0 and agora - _uvc_quadro_ms < paciencia:
 		return
@@ -406,7 +490,7 @@ func _vigiar_webcam_android(agora: int) -> void:
 func _iniciar_uvc_android() -> void:
 	if OS.get_name() != "Android" or _android_bridge == null:
 		return
-	if not _permissoes_ok:
+	if not _permissoes_ok or _caca != Caca.PONTE:
 		return
 	# A primeira chamada do plugin só começa a contar as câmeras: a próxima
 	# tentativa vem logo, e não 8 s depois.
@@ -466,13 +550,9 @@ func definir_ritmo(ms: int) -> void:
 		_android_bridge.call("setUvcHalfResolution", ms > 150)
 
 func _descobrir_cameras(recriar_extensao: bool) -> void:
-	if OS.get_name() == "Android":
-		return  # o plugin procura e abre (ver `_vigiar_webcam_android`)
+	if _servidor_proibido():
+		return  # vez do plugin (ver `_cacar_camera_android`)
 	_acordar_servidor()
-	# Com a ponte Android dona da câmera, o CameraServer não abre nada:
-	# dois donos para a mesma webcam derrubam os dois.
-	if OS.get_name() == "Android" and _ponte_tem_camera():
-		return
 	# Primeiro aproveita qualquer feed já publicado. Isso cobre backends do
 	# próprio sistema e evita recriar a extensão quando a câmera já está viva.
 	if not CameraServer.feeds().is_empty():
@@ -671,9 +751,7 @@ func _tentar_liberar_privacidade() -> void:
 	_proxima_busca_ms = 0
 
 func _adotar_camera_usb_preferida() -> void:
-	if not enabled or OS.get_name() == "Android":
-		return
-	if OS.get_name() == "Android" and _ponte_tem_camera():
+	if not enabled or _servidor_proibido():
 		return
 	var feeds: Array = CameraServer.feeds()
 	# REPARAR NAS NOVAS ANTES DE ESCOLHER. É aqui que uma webcam USB
@@ -699,7 +777,7 @@ func _adotar_camera_usb_preferida() -> void:
 const ESPERA_ANTES_DE_LIBERAR_MS := 3000
 
 func _abrir_feed_disponivel() -> void:
-	if not enabled or _feed != null or OS.get_name() == "Android":
+	if not enabled or _feed != null or _servidor_proibido():
 		return
 	var feeds: Array = CameraServer.feeds()
 	if feeds.is_empty():
@@ -787,7 +865,7 @@ func _on_camera_feeds_updated(_id: int = 0) -> void:
 		call_deferred("_adotar_camera_usb_preferida")
 
 func _acordar_servidor() -> void:
-	if OS.get_name() == "Android" or not _tem_permissao_da_camera():
+	if _servidor_proibido() or not _tem_permissao_da_camera():
 		return
 	if CameraServer.has_method("set_monitoring_feeds"):
 		CameraServer.call("set_monitoring_feeds", true)
@@ -861,6 +939,8 @@ func motivo_curto() -> String:
 	if estado == Estado.PARADA:
 		return status
 	if _feed == null and _uvc_texture == null:
+		if OS.get_name() == "Android":
+			return _motivo_android()
 		return "NENHUMA CÂMERA USB ENCONTRADA"
 	if not _sessao_aprovada:
 		return "AGUARDANDO O PRIMEIRO QUADRO"

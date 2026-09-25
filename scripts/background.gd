@@ -92,6 +92,11 @@ func _montar_camada_parada() -> void:
 func vida(valor: float) -> void:
 	if _vivo != null:
 		_vivo.set_shader_parameter("forca", valor)
+	# NA LUTA O FUNDO FICA PARADO: ele está quase todo atrás da arena, e o
+	# shader de tela cheia (1080x1920 pixels, todo quadro) era trabalho da
+	# placa de vídeo que ninguém via. Na abertura ele volta a se mexer.
+	if _parado != null:
+		_parado.material = _vivo if valor >= 0.5 else null
 
 ## O PASSO VEM DE FORA. Ver o cabeçalho.
 func avancar(passo: float) -> void:

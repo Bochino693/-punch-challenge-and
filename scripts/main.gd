@@ -1339,7 +1339,7 @@ func soltar_entrada() -> void:
 	# Arduino e câmera só DEPOIS da animação de abertura (~5,5 s): o
 	# Arduino aos 6 s, a câmera aos 7 s. A luva da entrada anda sozinha.
 	_perifericos_em = animation_time + 6.0
-	_diario_fecha_em = animation_time + 40.0
+	_diario_fecha_em = animation_time + 90.0
 	# SÓ AGORA câmera e Arduino começam (e as janelas de permissão, se
 	# forem necessárias): o carregamento já terminou.
 	if camera_service != null:

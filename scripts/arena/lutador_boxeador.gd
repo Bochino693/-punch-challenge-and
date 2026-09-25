@@ -201,6 +201,12 @@ func montar() -> void:
 			# brilho nos músculos que desenha o corpo de longe.
 			_mat_pele.normal_scale = 1.15
 			_pele.set_surface_override_material(0, _mat_pele)
+			# A PELE DE VERDADE: shader próprio (luz que atravessa a borda,
+			# suor quebrado por poros, relevo dos músculos). Sem os mapas,
+			# fica o material padrão acima.
+			var pele := _material_da_pele(mat)
+			if pele != null:
+				_pele.set_surface_override_material(0, pele)
 	# O RESTO DA ROUPA TAMBÉM GANHA CONTORNO. Couro das luvas e das botas,
 	# cetim do calção e o metal do cinturão pegam a luz de recorte: o
 	# personagem se descola do fundo e parece mais nítido sem custar um
@@ -236,6 +242,27 @@ func montar() -> void:
 	_pronto = true
 	_reiniciar_corpo()
 	_tocar("idle")
+
+
+const SHADER_PELE := "res://shaders/pele.gdshader"
+const RELEVO_PELE := "res://assets/lutador3d/pele_relevo.png"
+const POROS_PELE := "res://assets/lutador3d/pele_poros.png"
+var _shader_pele: ShaderMaterial = null
+var _dano_pintado := -1.0
+
+func _material_da_pele(base: StandardMaterial3D) -> ShaderMaterial:
+	if base.albedo_texture == null:
+		return null
+	for caminho in [SHADER_PELE, RELEVO_PELE, POROS_PELE]:
+		if not ResourceLoader.exists(caminho):
+			return null
+	var m := ShaderMaterial.new()
+	m.shader = load(SHADER_PELE)
+	m.set_shader_parameter("pintura", base.albedo_texture)
+	m.set_shader_parameter("relevo", load(RELEVO_PELE))
+	m.set_shader_parameter("poros", load(POROS_PELE))
+	_shader_pele = m
+	return m
 
 
 func completo() -> bool:
@@ -1257,3 +1284,6 @@ func _pintar() -> void:
 		# O estrago aparece: a pele fica mais vermelha com o dano.
 		var d := clampf(dano, 0.0, 1.0)
 		_mat_pele.albedo_color = Color(1.0, 1.0 - 0.10 * d, 1.0 - 0.14 * d)
+		if _shader_pele != null and absf(d - _dano_pintado) > 0.01:
+			_dano_pintado = d
+			_shader_pele.set_shader_parameter("dano", d)

@@ -164,7 +164,9 @@ func _montar_mundo() -> void:
 	camera = Camera3D.new()
 	camera.name = "Camera"
 	camera.fov = 44.0
-	camera.near = 0.15
+	# Plano de corte bem perto: no soco na tela a luva chega a um palmo da
+	# lente, e com o corte longe ela aparecia oca, "transparente".
+	camera.near = 0.04
 	camera.far = 30.0
 	_mundo.add_child(camera)
 	_calcular_enquadramento()
@@ -486,7 +488,27 @@ func instalar() -> bool:
 		_mundo.remove_child(modelo)
 		modelo.queue_free()
 	_montar_sombra()
+	_luzes_de_recorte_so_no_lutador()
 	return lutador != null and lutador.completo()
+
+
+## AS LUZES DE RECORTE (rosa e azul) SÓ ACENDEM O LUTADOR.
+##
+## No renderizador da TV Box cada luz pontual é mais uma PASSADA inteira
+## em tudo o que ela alcança: ringue, cordas, lona e lutador eram
+## desenhados três vezes por quadro. O recorte colorido só importa no
+## contorno do lutador — então só ele está na camada dessas luzes. O
+## resto da arena fica com a luz principal, numa passada só.
+const CAMADA_DO_LUTADOR := 2
+
+func _luzes_de_recorte_so_no_lutador() -> void:
+	if lutador == null:
+		return
+	for no in lutador.find_children("*", "VisualInstance3D", true, false):
+		(no as VisualInstance3D).layers |= CAMADA_DO_LUTADOR
+	for luz in [_rim_quente, _rim_frio]:
+		if luz != null:
+			luz.light_cull_mask = CAMADA_DO_LUTADOR
 
 
 func _montar_sombra() -> void:
@@ -535,6 +557,13 @@ func _aplicar_tamanho() -> void:
 
 
 func _ajustar_tamanho() -> void:
+	# NA TV BOX O TAMANHO NÃO MUDA NO MEIO DA LUTA. Trocar resolução e MSAA
+	# da arena realoca a imagem dela, e no quadro da troca o lutador
+	# sumia ou saía apagado — sempre nos momentos mais pesados (soco,
+	# queda), que é quando o vigia de desempenho apertava. Um tamanho só,
+	# escolhido para a TV Box, o jogo inteiro.
+	if OS.has_feature("mobile"):
+		return
 	var magro := _magro
 	if not _magro and qualidade < DESCE_PARA_MAGRO:
 		magro = true
@@ -799,6 +828,17 @@ func _camera(delta := 0.0) -> void:
 	var extra := lutador.camera_extra() if lutador != null else Vector2.ZERO
 	var pos := Vector3(passeio * (1.0 - clampf(extra.x * 1.5, 0.0, 1.0)), _altura_da_camera + sin(_relogio * 0.21) * 0.05 - extra.y, _distancia - _empurrao * 0.30 - extra.x)
 	var mira := Vector3(0.0, _altura_da_mira + _empurrao * 0.06, 0.0)
+	# NO SOCO NA TELA A CÂMERA OLHA NO ROSTO. Ela chegava perto do lutador
+	# ainda mirando o meio do corpo — de perto, o meio do corpo é a
+	# cintura, e o quadro enchia de calção. Agora, conforme ela se
+	# aproxima, sobe até a altura dos olhos e mira o rosto: o soco vem na
+	# cara de quem joga, com a expressão do lutador no centro.
+	var perto := clampf(extra.x / 0.72, 0.0, 1.0)
+	if perto > 0.001:
+		var rosto := Lutador3D.ALTURA_DA_FIGURA * 0.90 + deslocamento_vertical()
+		var k := perto * perto * (3.0 - 2.0 * perto)
+		pos.y = lerpf(pos.y, rosto + 0.03, k)
+		mira.y = lerpf(mira.y, rosto - 0.04, k)
 	var caido := lutador.queda if lutador != null else 0.0
 	if caido > 0.001:
 		# No nocaute a câmera afasta e desce: um corpo caído é largo.
@@ -825,6 +865,13 @@ func _camera(delta := 0.0) -> void:
 	camera.look_at(_cam_mira + balanco, Vector3.UP)
 	if absf(rolo) > 0.0001:
 		camera.rotate_object_local(Vector3.FORWARD, rolo)
+
+
+## Quanto o corpo do lutador subiu/desceu (agachado na guarda, pulando).
+func deslocamento_vertical() -> float:
+	if lutador != null and lutador.has_method("deslocamento"):
+		return float(lutador.deslocamento().y)
+	return 0.0
 
 
 func _luzes() -> void:
