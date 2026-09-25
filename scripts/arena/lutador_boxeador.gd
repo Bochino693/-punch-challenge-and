@@ -485,10 +485,10 @@ func deslocamento() -> Vector3:
 ## longo é fatiado em passos de até 1/30 s — as molas continuam estáveis e
 ## o relógio da luta anda junto com o relógio do jogo.
 const SUBPASSO := 1.0 / 30.0
-## O RITMO DA LUTA: o corpo inteiro anda 30% mais rápido que o relógio —
+## O RITMO DA LUTA: o corpo inteiro anda 40% mais rápido que o relógio —
 ## guarda, passos, reações e comemoração. No tempo "real" o boxeador
 ## parecia em câmera lenta na tela da máquina.
-const VELOCIDADE := 1.3
+const VELOCIDADE := 1.4
 
 func atualizar(delta: float) -> void:
 	var resto := clampf(delta, 0.0, 0.15) * VELOCIDADE

@@ -58,31 +58,39 @@ uniform sampler2D cima : source_color, filter_linear_mipmap, repeat_disable;
 uniform float agito = 0.0;
 uniform float tempo = 0.0;
 uniform float acende = 1.0;
+// A FILEIRA: quantas pessoas (uma por coluna) e em que faixa da imagem.
+uniform float colunas = 40.0;
+uniform float v0 = 0.0;
+uniform float v1 = 1.0;
+uniform float semente = 0.0;
 void fragment() {
-	vec2 uv = UV;
-	float vida = 0.40 + agito * 0.60;
-	float col = floor(uv.x * 72.0);
-	float r = fract(sin(col * 78.233) * 43758.5453);
-	float pulo = max(0.0, sin(tempo * (3.2 + r * 3.8 + agito * 3.0) + r * 6.2831));
-	uv.y += pulo * (0.018 + 0.030 * agito) * (0.6 + r * 0.4);
-	uv.x += sin(tempo * (1.2 + r) + r * 9.0) * 0.004 * vida;
-	// A coluna que pula NÃO pode ler fora da imagem: com a textura
-	// repetindo, a borda de baixo aparecia no alto da coluna — eram as
-	// FAIXAS BRANCAS atrás do ringue.
-	uv = clamp(uv, vec2(0.001), vec2(0.999));
+	// CADA COLUNA É UMA PESSOA INTEIRA: ela pula, balança e levanta os
+	// braços junta — nada de metade de corpo indo para um lado.
+	float col = floor(UV.x * colunas);
+	float r = fract(sin(col * 78.233 + semente * 13.7) * 43758.5453);
+	float r2 = fract(sin(col * 12.9898 + semente * 7.1) * 24634.6345);
+	float vida = 0.60 + agito * 0.40;
+	float respira = sin(tempo * (1.6 + r2 * 1.4) + r * 6.2831) * 0.012 * vida;
+	float pulo = max(0.0, sin(tempo * (3.0 + r * 3.6 + agito * 3.0) + r * 6.2831));
+	pulo *= step(0.35 - agito * 0.3, r2) * (0.03 + 0.07 * agito);
+	float dentro = fract(UV.x * colunas);
+	// balanço de lado, dentro da própria coluna
+	dentro = clamp(dentro + sin(tempo * (1.1 + r) + r * 9.0) * 0.05 * vida, 0.0, 1.0);
+	float y = UV.y + respira + pulo;
+	vec2 uv = vec2((col + dentro) / colunas, mix(v0, v1, clamp(y, 0.004, 0.996)));
 	vec4 a = texture(baixo, uv);
 	vec4 b = texture(cima, uv);
-	float ola = 0.5 + 0.5 * sin(UV.x * 7.0 - tempo * 1.7);
-	float braco = 0.5 + 0.5 * sin(tempo * (2.6 + r * 2.2) + r * 12.0);
-	float mao = step(0.5, braco * (0.35 + 0.65 * ola) + agito * 0.45) * step(0.30 - agito * 0.25, r);
+	// braços para o alto em ONDA ("ola") e, no golpe, todo mundo
+	float ola = 0.5 + 0.5 * sin(UV.x * 7.0 - tempo * 1.7 + semente);
+	float braco = 0.5 + 0.5 * sin(tempo * (2.4 + r * 2.0) + r * 12.0);
+	float mao = step(0.55, braco * (0.35 + 0.65 * ola) + agito * 0.5) * step(0.25 - agito * 0.2, r);
 	vec4 c = mix(a, b, mao);
-	// O flash de celular é um PONTINHO na mão de alguém, e não a coluna
-	// inteira acesa (a coluna acesa também lia como faixa branca).
-	float celular = step(0.992, fract(sin(col * 12.9898 + floor(tempo * 2.5 + r * 7.0) * 3.7) * 43758.5)) * c.a;
-	vec2 celula = vec2(fract(uv.x * 72.0) - 0.5, (UV.y - 0.62) * 14.0);
-	celular *= 1.0 - smoothstep(0.05, 0.16, length(celula));
+	// flash de celular: um pontinho na mão de alguém, de vez em quando
+	float celular = step(0.985, fract(sin(col * 12.9898 + floor(tempo * 2.2 + r * 7.0) * 3.7 + semente) * 43758.5)) * c.a;
+	vec2 celula = vec2(dentro - 0.5, (UV.y - 0.30) * 5.0);
+	celular *= 1.0 - smoothstep(0.04, 0.12, length(celula));
 	ALBEDO = c.rgb * acende * (1.0 + agito * 0.35) + vec3(0.9, 0.95, 1.0) * celular * 1.2;
-	ALPHA = c.a * (0.80 + 0.20 * agito);
+	ALPHA = c.a * (0.86 + 0.14 * agito);
 }
 """
 const SHADER_FUNDO := """
@@ -113,7 +121,8 @@ var _rim_quente: OmniLight3D = null
 var _rim_frio: OmniLight3D = null
 var _mat_fundo: ShaderMaterial = null
 var _mat_torcida: ShaderMaterial = null
-var _gente: MeshInstance3D = null
+var _gente: Node3D = null
+var _mats_torcida: Array = []
 ## A torcida: quanto ela está agitada (0..1) e para onde vai.
 var _agito := 0.0
 var _agito_alvo := 0.0
@@ -254,15 +263,38 @@ func _montar_fundo() -> void:
 	_peca(quadro, _mat_fundo, Vector3(0.0, 1.9, -4.8))
 	# A GENTE da plateia, em silhueta, na frente do fundo pintado.
 	if ResourceLoader.exists(TEX_TORCIDA_BAIXO) and ResourceLoader.exists(TEX_TORCIDA_CIMA):
-		_mat_torcida = ShaderMaterial.new()
 		var sh2 := Shader.new()
 		sh2.code = SHADER_TORCIDA
-		_mat_torcida.shader = sh2
-		_mat_torcida.set_shader_parameter("baixo", load(TEX_TORCIDA_BAIXO))
-		_mat_torcida.set_shader_parameter("cima", load(TEX_TORCIDA_CIMA))
-		var gente := QuadMesh.new()
-		gente.size = Vector2(10.0, 2.5)
-		_gente = _peca(gente, _mat_torcida, Vector3(0.0, 0.55, -4.3))
+		var baixo: Texture2D = load(TEX_TORCIDA_BAIXO)
+		var cima: Texture2D = load(TEX_TORCIDA_CIMA)
+		# TRÊS FILEIRAS, cada uma no seu plano (a de trás mais alta e mais
+		# longe): colunas e faixas iguais às de `tools/gerar_torcida.py`.
+		_gente = Node3D.new()
+		_gente.name = "Torcida"
+		_mundo.add_child(_gente)
+		_mats_torcida.clear()
+		var fileiras := [
+			[52.0, 0.0, 150.0, Vector3(0.0, 0.60, -4.45)],
+			[40.0, 150.0, 320.0, Vector3(0.0, 0.20, -4.32)],
+			[30.0, 320.0, 512.0, Vector3(0.0, -0.24, -4.20)],
+		]
+		for k in fileiras.size():
+			var fl: Array = fileiras[k]
+			var mat := ShaderMaterial.new()
+			mat.shader = sh2
+			mat.set_shader_parameter("baixo", baixo)
+			mat.set_shader_parameter("cima", cima)
+			mat.set_shader_parameter("colunas", fl[0])
+			mat.set_shader_parameter("v0", float(fl[1]) / 512.0)
+			mat.set_shader_parameter("v1", float(fl[2]) / 512.0)
+			mat.set_shader_parameter("semente", float(k) * 3.3)
+			_mats_torcida.append(mat)
+			var quad := QuadMesh.new()
+			quad.size = Vector2(10.0, 2.5 * (float(fl[2]) - float(fl[1])) / 512.0)
+			var mi := _peca(quad, mat, fl[3])
+			_mundo.remove_child(mi)
+			_gente.add_child(mi)
+		_mat_torcida = _mats_torcida[0]
 	# O chão do ginásio entre o ringue e a plateia: escuro, só para o
 	# tablado parecer suspenso.
 	var chao := PlaneMesh.new()
@@ -601,11 +633,11 @@ func _aplicar_tamanho() -> void:
 	# A RESOLUÇÃO NÃO CAI MAIS quando a máquina aperta: imagem encolhida
 	# e esticada é o "boneco em baixa resolução". O que cede é o MSAA.
 	var fator := _fator_da_tela()
-	# NA TV BOX A ARENA RENDERIZA A 85% (72% quando o vigia aperta) e é
+	# NA TV BOX A ARENA RENDERIZA A 78% (70% quando o vigia aperta) e é
 	# ampliada no quadro: um terço a menos de pixels para a placa de vídeo
 	# pintar, a diferença mais sentida no "jogo lento".
 	if OS.has_feature("mobile"):
-		fator *= 0.72 if _magro else 0.85
+		fator *= 0.70 if _magro else 0.78
 	var novo := Vector2i((TELA_LOGICA * fator).round())
 	if size != novo:
 		size = novo
@@ -968,10 +1000,10 @@ func _luzes() -> void:
 	_mat_fundo.set_shader_parameter("acende", acende)
 	_mat_fundo.set_shader_parameter("tempo", _relogio)
 	_mat_fundo.set_shader_parameter("agito", _agito)
-	if _mat_torcida != null:
-		_mat_torcida.set_shader_parameter("acende", acende)
-		_mat_torcida.set_shader_parameter("tempo", _relogio)
-		_mat_torcida.set_shader_parameter("agito", _agito)
+	for mat in _mats_torcida:
+		(mat as ShaderMaterial).set_shader_parameter("acende", acende)
+		(mat as ShaderMaterial).set_shader_parameter("tempo", _relogio)
+		(mat as ShaderMaterial).set_shader_parameter("agito", _agito)
 	_mat_lona.albedo_color = Color(acende, acende, acende)
 	for i in range(_fachos.size()):
 		var f := _fachos[i]

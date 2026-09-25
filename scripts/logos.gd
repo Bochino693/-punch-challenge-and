@@ -24,6 +24,14 @@ static func textura(nome: String, altura: float) -> Texture2D:
 		_cache[chave] = load(caminho) if ResourceLoader.exists(caminho) else null
 	return _cache[chave]
 
+## Carrega de antemão todas as versões (no carregamento). Carregar uma
+## versão nova no meio do jogo — a da cortina de transição, por exemplo —
+## era um tranco no primeiro uso.
+static func aquecer() -> void:
+	for nome in ["superboxing", "lazersport"]:
+		for a in ALTURAS:
+			textura(nome, float(a))
+
 ## Desenha a logo com a altura pedida, em pixels inteiros (nítida).
 ## `ancora` é o ponto de referência; `alinhamento` 0 = centro, 1 = direita
 ## (a ancora é o canto direito de cima).

@@ -180,50 +180,80 @@ def incentivo(duracao=4.2):
 
 
 # ------------------------------------------------------------ plateia
+## AS FILEIRAS DA PLATEIA: (colunas, faixa em pixels, cor base).
+## CADA PESSOA MORA INTEIRA DENTRO DA SUA COLUNA, e cada fileira numa
+## faixa própria da imagem. O shader da arena faz cada coluna pular no seu
+## ritmo — com gente espalhada ao acaso (antes), a coluna cortava a pessoa
+## ao meio e metade do corpo pulava separada da outra: a torcida saía
+## torta e "distorcida". Agora a coluna É a pessoa.
+FILEIRAS = [
+    (52, (0, 150), (24, 17, 34)),     # fundo: pequena e mais clara
+    (40, (150, 320), (17, 12, 25)),   # meio
+    (30, (320, 512), (11, 8, 16)),    # frente: grande e escura
+]
+CAMISAS = [(70, 18, 30), (22, 30, 78), (60, 20, 70), (18, 52, 60), (72, 50, 14), (40, 40, 48)]
+
+
 def plateia():
     L, A = 2048, 512
     baixo = Image.new("RGBA", (L, A), (0, 0, 0, 0))
     cima = Image.new("RGBA", (L, A), (0, 0, 0, 0))
     db, dc = ImageDraw.Draw(baixo), ImageDraw.Draw(cima)
-    fileiras = [(0.50, 34, (22, 16, 30)), (0.66, 44, (16, 11, 22)), (0.84, 58, (10, 7, 14))]
-    for y_rel, esc, cor in fileiras:
-        x = rng.uniform(-20, 10)
-        while x < L + 30:
-            w = esc * rng.uniform(0.85, 1.2)
-            y = A * y_rel + rng.uniform(-6, 6)
-            cabeca = w * 0.36
+    for colunas, (y0, y1), cor in FILEIRAS:
+        larg_col = L / colunas
+        w = larg_col * 0.84 / 1.30
+        ombro = y0 + 1.68 * w
+        for c in range(colunas):
+            x = (c + 0.5) * larg_col
+            y = ombro + rng.uniform(-2.0, 2.0)
+            ww = w * rng.uniform(0.92, 1.0)
+            cabeca = ww * 0.36
+            camisa = np.array(CAMISAS[rng.integers(len(CAMISAS))]) * rng.uniform(0.35, 0.6)
+            tronco = tuple(int(v) for v in (np.array(cor) * 0.55 + camisa * 0.45)) + (255,)
+            pele = cor + (255,)
+            abre = rng.uniform(0.04, 0.16)  # o MESMO para os dois braços: simétrico
             for d, bracos in ((db, False), (dc, True)):
-                d.ellipse([x - cabeca, y - w * 1.05 - cabeca, x + cabeca, y - w * 1.05 + cabeca], fill=cor + (255,))
-                d.rounded_rectangle([x - w * 0.55, y - w * 0.72, x + w * 0.55, y + w * 1.6], radius=w * 0.3,
-                                    fill=cor + (255,))
+                d.ellipse([x - cabeca, y - ww * 1.05 - cabeca, x + cabeca, y - ww * 1.05 + cabeca], fill=pele)
+                # ombros largos afinando para a cintura (um tronco, não um frasco)
+                d.polygon([(x - ww * 0.65, y - ww * 0.55), (x + ww * 0.65, y - ww * 0.55),
+                           (x + ww * 0.50, y1 - 1), (x - ww * 0.50, y1 - 1)], fill=tronco)
+                d.ellipse([x - ww * 0.65, y - ww * 0.78, x - ww * 0.25, y - ww * 0.35], fill=tronco)
+                d.ellipse([x + ww * 0.25, y - ww * 0.78, x + ww * 0.65, y - ww * 0.35], fill=tronco)
+                d.rectangle([x - ww * 0.22, y - ww * 0.80, x + ww * 0.22, y - ww * 0.55], fill=pele)
                 if bracos:
-                    for s in (-1, 1):
-                        abre = rng.uniform(0.1, 0.5)
-                        ox, oy = x + s * w * 0.45, y - w * 0.55
-                        mx, my = ox + s * w * (0.25 + abre), oy - w * 0.9
-                        d.line([ox, oy, mx, my], fill=cor + (255,), width=int(w * 0.24))
-                        d.ellipse([mx - w * 0.14, my - w * 0.14, mx + w * 0.14, my + w * 0.14], fill=cor + (255,))
-            x += w * rng.uniform(1.05, 1.35)
-    # luz de contorno: vermelho de um lado, azul do outro
+                    for lado in (-1, 1):
+                        ox, oy = x + lado * ww * 0.50, y - ww * 0.60
+                        mx, my = ox + lado * ww * abre, oy - ww * 0.95
+                        d.line([ox, oy, mx, my], fill=tronco, width=max(2, int(ww * 0.24)))
+                        d.ellipse([mx - ww * 0.14, my - ww * 0.14, mx + ww * 0.14, my + ww * 0.14], fill=pele)
+    # luz de contorno: magenta de um lado, ciano do outro, e o alto das cabeças
     for img in (baixo, cima):
         a = np.asarray(img).astype(np.float32)
         alfa = a[..., 3] / 255
         borda_e = np.clip(alfa - np.roll(alfa, 3, axis=1), 0, 1)
         borda_d = np.clip(alfa - np.roll(alfa, -3, axis=1), 0, 1)
         borda_c = np.clip(alfa - np.roll(alfa, 3, axis=0), 0, 1)
-        a[..., 0] += borda_e * 150 + borda_c * 50
-        a[..., 1] += borda_c * 40
-        a[..., 2] += borda_d * 170 + borda_c * 60
+        a[..., 0] += borda_e * 170 + borda_c * 60
+        a[..., 1] += borda_c * 45
+        a[..., 2] += borda_d * 190 + borda_c * 70
         a[..., :3] = np.clip(a[..., :3], 0, 255)
         img.paste(Image.fromarray(a.astype(np.uint8), "RGBA"))
-    baixo = baixo.filter(ImageFilter.GaussianBlur(1.6))
-    cima = cima.filter(ImageFilter.GaussianBlur(1.6))
+    baixo = baixo.filter(ImageFilter.GaussianBlur(1.2))
+    cima = cima.filter(ImageFilter.GaussianBlur(1.2))
     baixo.save(ARENA / "torcida_baixo.png", optimize=True)
     cima.save(ARENA / "torcida_cima.png", optimize=True)
     print("ok plateia", L, "x", A)
 
 
+def so_plateia():
+    plateia()
+
+
 if __name__ == "__main__":
+    import sys
+    if "--so-plateia" in sys.argv:
+        plateia()
+        raise SystemExit
     gravar("torcida_vaia.wav", vaia())
     gravar("torcida_festa.wav", festa())
     gravar("torcida_incentivo.wav", incentivo())
