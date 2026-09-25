@@ -47,6 +47,49 @@ if (Test-Path $ApkEsperado) {
 
 Write-Host "Projeto confirmado: Super Boxing (Punch Challenge) - build 88" -ForegroundColor Green
 
+# ------------------------------------------------------------------
+# ESPACO EM DISCO. Sem espaco o Gradle falha no meio ("Espaco insuficiente
+# no disco") e o Godot chega a corromper o proprio arquivo de configuracao
+# (perdendo o caminho do Java). Com pouco espaco, os temporarios do Gradle
+# e do Godot sao limpos antes de comecar.
+function Espaco-Livre-GB([string]$Caminho) {
+    $raizDisco = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $Caminho).Path)
+    $info = New-Object System.IO.DriveInfo($raizDisco)
+    return [math]::Round($info.AvailableFreeSpace / 1GB, 1)
+}
+function Limpar-Temporarios {
+    $alvos = @(
+        (Join-Path $env:TEMP "PunchChallenge-Godot-4.6.1"),
+        (Join-Path $env:USERPROFILE ".gradle\.tmp"),
+        (Join-Path $env:USERPROFILE ".gradle\caches\build-cache-1"),
+        (Join-Path $Raiz "android\build\build"),
+        (Join-Path $Raiz "android\build\.gradle"),
+        (Join-Path $Raiz "tools\android_usb_plugin\plugin\build"),
+        (Join-Path $Raiz "tools\android_usb_plugin\build"),
+        (Join-Path $Raiz "tools\android_usb_plugin\.gradle")
+    )
+    foreach ($a in $alvos) {
+        if (Test-Path -LiteralPath $a) {
+            Remove-Item -LiteralPath $a -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Get-ChildItem (Join-Path $env:USERPROFILE ".gradle\daemon") -Recurse -Filter "*.log" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+function Espaco-Minimo {
+    return [math]::Min((Espaco-Livre-GB $Raiz), (Espaco-Livre-GB $env:USERPROFILE))
+}
+$Livre = Espaco-Minimo
+if ($Livre -lt 6) {
+    Write-Host "Pouco espaco em disco ($Livre GB). Limpando temporarios do Gradle e do Godot..." -ForegroundColor Yellow
+    Limpar-Temporarios
+    $Livre = Espaco-Minimo
+    Write-Host "      Espaco livre agora: $Livre GB" -ForegroundColor Yellow
+}
+if ($Livre -lt 3) {
+    throw "DISCO CHEIO: so $Livre GB livres. Libere pelo menos 5 GB (esvazie a Lixeira, apague videos e downloads antigos) e rode de novo."
+}
+
 if (-not (Test-Path "$env:ANDROID_HOME\platform-tools\adb.exe")) {
     throw "SDK Android invalido em C:\AndroidSdk. Falta platform-tools\adb.exe."
 }
@@ -177,6 +220,69 @@ if (-not (Test-Path $Aar)) {
     throw "Plugin USB nao foi criado: $Aar"
 }
 
+# ------------------------------------------------------------------
+# A CONFIGURACAO DO GODOT (Java e SDK Android) SEMPRE CERTA. Se o arquivo
+# de configuracao do editor estiver corrompido (acontece quando o disco
+# enche no meio de uma gravacao) ele e refeito; se faltar o caminho do
+# Java ou do SDK, ele e preenchido. Sem isto a exportacao para com "Um
+# caminho valido para o Java SDK e necessario".
+function Achar-Java {
+    $candidatos = @()
+    if ($env:JAVA_HOME) { $candidatos += $env:JAVA_HOME }
+    $candidatos += Get-ChildItem "C:\Program Files\Eclipse Adoptium", "C:\Program Files\Java", `
+        "C:\Program Files\Microsoft", "C:\Program Files\Zulu", "C:\Program Files\OpenJDK" `
+        -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '17' } |
+        Sort-Object Name -Descending |
+        Select-Object -ExpandProperty FullName
+    $candidatos += "C:\Program Files\Android\Android Studio\jbr"
+    $java = Get-Command java.exe -ErrorAction SilentlyContinue
+    if ($java) { $candidatos += (Split-Path (Split-Path $java.Source)) }
+    foreach ($d in $candidatos) {
+        if ($d -and (Test-Path -LiteralPath (Join-Path $d "bin\java.exe"))) {
+            return (Resolve-Path -LiteralPath $d).Path
+        }
+    }
+    return $null
+}
+$Configuracao = Join-Path $env:APPDATA "Godot\editor_settings-4.6.tres"
+$SemBom = New-Object System.Text.UTF8Encoding($false)
+$Java = Achar-Java
+$JavaGodot = if ($Java) { $Java -replace '\\', '/' } else { "" }
+$Texto = ""
+if (Test-Path -LiteralPath $Configuracao) {
+    $Texto = [System.IO.File]::ReadAllText($Configuracao)
+}
+if (-not $Texto -or -not $Texto.TrimStart([char]0xFEFF, ' ', "`r", "`n", "`t").StartsWith("[gd_resource")) {
+    if (Test-Path -LiteralPath $Configuracao) {
+        Copy-Item -LiteralPath $Configuracao -Destination "$Configuracao.quebrado" -Force
+        Write-Host "      Configuracao do Godot estava corrompida: refeita." -ForegroundColor Yellow
+    }
+    New-Item -ItemType Directory -Path (Split-Path $Configuracao) -Force | Out-Null
+    $Texto = "[gd_resource type=`"EditorSettings`" format=3]`n`n[resource]`n"
+}
+function Garantir-Chave([string]$Chave, [string]$Valor) {
+    if (-not $Valor) { return }
+    $linha = "$Chave = `"$Valor`""
+    $padrao = [regex]::Escape($Chave) + '\s*=\s*"[^"]*"'
+    if ($script:Texto -match $padrao) {
+        $script:Texto = [regex]::Replace($script:Texto, $padrao, $linha.Replace('$', '$$'))
+    } else {
+        $script:Texto = $script:Texto.TrimEnd() + "`n" + $linha + "`n"
+    }
+}
+$JavaAtual = ""
+if ($Texto -match 'export/android/java_sdk_path\s*=\s*"([^"]*)"') { $JavaAtual = $Matches[1] }
+if (-not $JavaAtual -or -not (Test-Path -LiteralPath (Join-Path $JavaAtual "bin\java.exe"))) {
+    if (-not $JavaGodot) {
+        throw "Java 17 nao encontrado neste PC. Instale o Java 17 (Eclipse Temurin 17) e rode de novo."
+    }
+    Garantir-Chave "export/android/java_sdk_path" $JavaGodot
+    Write-Host "      Java configurado no Godot: $JavaGodot" -ForegroundColor Green
+}
+Garantir-Chave "export/android/android_sdk_path" "C:/AndroidSdk"
+[System.IO.File]::WriteAllText($Configuracao, $Texto, $SemBom)
+
 Write-Host "[3/3] Exportando APK..." -ForegroundColor Cyan
 & (Join-Path $Scripts "EXPORTAR_APK_ANDROID.bat") "$Godot"
 if ($LASTEXITCODE -ne 0) {
@@ -187,6 +293,10 @@ $Apk = Get-Item $ApkEsperado -ErrorAction Stop
 if ($Apk.Length -lt 1MB) {
     throw "APK incompleto: $($Apk.Length) bytes."
 }
+
+# Os modelos de exportacao ja foram instalados: o pacote baixado (mais de
+# 1 GB) nao precisa ficar ocupando o disco.
+Remove-Item -LiteralPath (Join-Path $env:TEMP "PunchChallenge-Godot-4.6.1") -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "APK GERADO E CONFERIDO" -ForegroundColor Green
