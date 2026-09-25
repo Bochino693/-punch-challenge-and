@@ -1,4 +1,4 @@
-SUPER BOXING (Punch Challenge) - BUILD 87
+SUPER BOXING (Punch Challenge) - BUILD 88
 =========================================
 
 GERAR O APK (um clique so)
@@ -33,6 +33,14 @@ A camera abre sozinha e se religa se parar. O jogo tenta os dois caminhos
 do Android (camera do sistema e Camera2/webcam externa), um de cada vez,
 ate vir imagem. Se nao vier, a linha "SEM CAMERA" embaixo da tela diz o
 motivo (PLUGIN: ... ou CAMERA2: ...) - fotografe e mande.
+
+CAMERA NAO APARECE? UM COMANDO SO
+---------------------------------
+Com a TV Box ligada no PC pelo ADB (USB ou rede), clique duas vezes em
+  CAMERA_TVBOX.bat          (ou CAMERA_TVBOX.bat 192.168.0.50 pela rede)
+Ele libera a camera para o jogo, abre o jogo, espera 90 s e grava
+CAMERA_RELATORIO.txt com tudo o que a TV Box enxerga (USB, cameras,
+permissoes e cada tentativa do jogo). Mande esse arquivo.
 
 SE A ABERTURA TRAVAR
 --------------------

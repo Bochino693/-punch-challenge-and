@@ -15,7 +15,7 @@ extends SubViewport
 ##     engasga) e shaders compilados no arranque (`aquecer`).
 
 ## Resolução cheia do quadro (1:1 na tela): o ringue sai nítido.
-const TELA_LOGICA := Vector2(980.0, 996.0)
+const TELA_LOGICA := Vector2(1008.0, 1422.0)
 ## Degrau magro para quando o vigia de desempenho apertar.
 const FATOR_MAGRO := 0.75
 const DESCE_PARA_MAGRO := 0.50
@@ -26,7 +26,7 @@ const FATOR_MAXIMO := 1.5
 
 ## Enquadramento: quanto da altura da janela o lutador em pé ocupa, e
 ## quanto a câmera fica acima da mira (a leve inclinação de transmissão).
-const OCUPACAO_DO_LUTADOR := 0.79
+const OCUPACAO_DO_LUTADOR := 0.66
 const CAMERA_ACIMA_DA_MIRA := 0.21
 
 ## O ringue (metros). A meia largura põe os postes de trás nas bordas do
@@ -304,17 +304,63 @@ func _montar_ringue() -> void:
 		_material_solido(Color("ff2ab0"), 0.35, 0.22),
 		_material_solido(Color("46dcff"), 0.35, 0.12),
 	]
+	# AS CORDAS DE TRÁS ESTICAM DE VERDADE: malha com anéis ao longo do
+	# comprimento e um shader que as curva para trás no meio (as pontas
+	# ficam presas nos postes). Ver `_mexer_cordas`.
+	var corda_fundo := corda.duplicate() as CylinderMesh
+	corda_fundo.rings = 24
+	var cores_cordas := [Color("ffd014"), Color("ff2ab0"), Color("46dcff")]
+	var brilhos := [0.12, 0.22, 0.12]
 	_cordas_fundo.clear()
+	_mat_cordas.clear()
 	for i in range(ALTURAS_DAS_CORDAS.size()):
 		var y: float = ALTURAS_DAS_CORDAS[i]
-		_cordas_fundo.append(_peca(corda, tintas[i], Vector3(0.0, y, -m), Vector3(0.0, 0.0, PI * 0.5)))
+		var mat := ShaderMaterial.new()
+		mat.shader = _shader_corda()
+		mat.set_shader_parameter("cor", cores_cordas[i])
+		mat.set_shader_parameter("brilho", brilhos[i])
+		mat.set_shader_parameter("meia", m)
+		_mat_cordas.append(mat)
+		_cordas_fundo.append(_peca(corda_fundo, mat, Vector3(0.0, y, -m), Vector3(0.0, 0.0, PI * 0.5)))
 		for lado in [-1.0, 1.0]:
 			_peca(corda, tintas[i], Vector3(lado * m, y, 0.0), Vector3(PI * 0.5, 0.0, 0.0))
 
 
-## AS CORDAS DE TRÁS CEDEM quando o lutador cai nelas, e voltam com um
+## AS CORDAS DE TRÁS CEDEM quando o lutador cai nelas — E A CADA SOCO DO
+## JOGADOR (ver `golpe`): esticam para trás no meio e voltam com um
 ## balanço de mola (passam um pouco do lugar e assentam).
 var _cordas_fundo: Array = []
+var _mat_cordas: Array = []
+static var _shader_da_corda: Shader = null
+
+static func _shader_corda() -> Shader:
+	if _shader_da_corda == null:
+		_shader_da_corda = Shader.new()
+		_shader_da_corda.code = """
+shader_type spatial;
+uniform vec4 cor : source_color = vec4(1.0);
+uniform float brilho = 0.12;
+uniform float empurra = 0.0;
+uniform float sobe = 0.0;
+uniform float meia = 1.6;
+void vertex() {
+	// O comprimento da corda é o eixo Y da malha; as pontas (nos postes)
+	// não se mexem, o meio vai mais longe — uma curva de corda esticada.
+	float t = clamp(abs(VERTEX.y) / meia, 0.0, 1.0);
+	float curva = 1.0 - t * t;
+	VERTEX.z -= empurra * curva;
+	// e balança na vertical (o eixo X da malha é o "para cima" da corda
+	// deitada): é o balanço que se vê de frente, como corda de ringue.
+	VERTEX.x += sobe * curva;
+}
+void fragment() {
+	ALBEDO = cor.rgb;
+	ROUGHNESS = 0.35;
+	SPECULAR = 0.6;
+	EMISSION = cor.rgb * brilho;
+}
+"""
+	return _shader_da_corda
 var _cordas_pos := 0.0
 var _cordas_vel := 0.0
 
@@ -326,12 +372,13 @@ func _mexer_cordas(delta: float) -> void:
 	_cordas_vel += (alvo - _cordas_pos) * 140.0 * d
 	_cordas_vel *= exp(-7.0 * d)
 	_cordas_pos += _cordas_vel * d
-	for i in range(_cordas_fundo.size()):
-		var c := _cordas_fundo[i] as Node3D
-		if c != null:
-			# a corda do meio (na altura das costas) cede mais
-			var peso: float = [0.55, 1.0, 0.75][mini(i, 2)]
-			c.position.z = -MEIO_RINGUE - 0.16 * _cordas_pos * peso
+	for i in range(_mat_cordas.size()):
+		# a corda do meio (na altura das costas) cede mais
+		var peso: float = [0.55, 1.0, 0.75][mini(i, 2)]
+		var mat := _mat_cordas[i] as ShaderMaterial
+		mat.set_shader_parameter("empurra", 0.55 * _cordas_pos * peso)
+		# cada corda balança num tempo um pouco diferente (não em bloco)
+		mat.set_shader_parameter("sobe", 0.24 * _cordas_vel / 11.8 * peso * (1.0 if i % 2 == 0 else -0.8))
 	if alvo > 0.6:
 		_publico = maxf(_publico, 0.4)
 
@@ -666,6 +713,9 @@ func golpe(forca: float, derruba := false, pontos := -1, ultimo := false) -> Dic
 	_tremor = clampf(0.35 + forca, 0.0, 1.35)
 	_clarao = clampf(0.4 + forca * 0.6, 0.0, 1.0)
 	_empurrao = forca
+	# O SOCO ESTICA AS CORDAS DE TRÁS: o baque passa pelo lutador e chega
+	# nelas — mais forte o soco, mais longe elas vão (e voltam balançando).
+	_cordas_vel += 2.5 + clampf(forca, 0.0, 1.2) * 6.5
 	_publico = maxf(_publico, clampf(0.08 + forca * (1.15 if derruba else 0.85), 0.0, 1.0))
 	var economia := 1.0 if qualidade >= 0.55 else 0.55
 	if _impacto != null:
@@ -730,6 +780,8 @@ func tela_atingida() -> bool:
 
 func preparar() -> void:
 	_cam_pos = Vector3.INF
+	_chao = 0.0
+	_chao_alvo = 0.0
 	_agito_alvo = 0.0
 	_agito_ate = 0.0
 	if lutador != null:
@@ -818,6 +870,12 @@ func _calcular_enquadramento() -> void:
 ## para ser seco.
 var _cam_pos := Vector3.INF
 var _cam_mira := Vector3.ZERO
+var _chao := 0.0
+var _chao_alvo := 0.0
+
+## O jogador foi nocauteado (câmera vai ao chão) ou levantou (volta).
+func jogador_no_chao(sim: bool) -> void:
+	_chao_alvo = 1.0 if sim else 0.0
 const CAMERA_MOLA := 7.5
 
 func _camera(delta := 0.0) -> void:
@@ -846,6 +904,18 @@ func _camera(delta := 0.0) -> void:
 		pos = pos.lerp(Vector3(0.0, _altura_da_camera * 0.54, _distancia * 1.07), t)
 		mira = mira.lerp(Vector3(0.0, _altura_da_mira * 0.58, 0.0), t)
 	var rolo := 0.0
+	# O JOGADOR NO CHÃO: depois do nocaute a câmera cai até a lona, meio
+	# de lado, olhando o lutador de baixo — quem perdeu vê o ginásio do
+	# chão. Cai rápido (com um quique) e só levanta na próxima rodada.
+	_chao = move_toward(_chao, _chao_alvo, delta * (2.4 if _chao_alvo > _chao else 1.2))
+	if _chao > 0.001:
+		var t := _chao * _chao * (3.0 - 2.0 * _chao)
+		var quique := sin(clampf(_chao, 0.0, 1.0) * PI) * 0.05 * (1.0 if _chao_alvo > 0.5 else 0.0)
+		var pos_chao := Vector3(0.42, 0.14 + quique, _distancia * 0.74)
+		var mira_chao := Vector3(-0.05, Lutador3D.ALTURA_DA_FIGURA * 0.78 + deslocamento_vertical(), 0.0)
+		pos = pos.lerp(pos_chao, t)
+		mira = mira.lerp(mira_chao, t)
+		rolo += 0.30 * t
 	var balanco := Vector3.ZERO
 	if _camb_t >= 0.0 and _camb.size() >= 9:
 		var t := _camb_t

@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bkcl6js6jdkl1"
-path="res://.godot/imported/boxeador_1.jpg-46aebcff1c3a8f4fb82eb5bad0f67fc9.ctex"
+uid="uid://q74x0dhwhvov"
+path="res://.godot/imported/boxeador_3.png-dcea587faf02b94824792b7f7e3bb5c2.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "aacf8a3095c121fee875e535a9c8ea94"
+"md5": "27116b8c18f4b3d108537ea2932bbccb"
 }
 
 [deps]
 
-source_file="res://assets/lutador3d/boxeador_1.jpg"
-dest_files=["res://.godot/imported/boxeador_1.jpg-46aebcff1c3a8f4fb82eb5bad0f67fc9.ctex"]
+source_file="res://assets/lutador3d/boxeador_3.png"
+dest_files=["res://.godot/imported/boxeador_3.png-dcea587faf02b94824792b7f7e3bb5c2.ctex"]
 
 [params]
 

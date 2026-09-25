@@ -108,6 +108,9 @@ def mistura(base, cor, peso):
 
 
 # ------------------------------------------------------------------ pele
+ANATOMIA_FORCA = 28.0
+
+
 def pintar_pele(ctx: dict, tam: int = 4096):
     v, f, uv, fuv, n = ctx["v"], ctx["f"], ctx["uv"], ctx["fuv"], ctx["n"]
     # Canais por vértice: posição, normal, cavidade, e máscaras.
@@ -146,6 +149,31 @@ def pintar_pele(ctx: dict, tam: int = 4096):
     # ---- relevo muscular: o vale entre músculos escurece, a crista acende.
     c = np.clip(CAV / 0.0035, -1.5, 1.5) * (1 - PALP)
     cor *= (1.0 - 0.21 * np.clip(c, 0, 1.5) + 0.06 * np.clip(-c, 0, 1))[:, None]
+
+    # ---- ANATOMIA ESCULPIDA: peitoral, esterno e abdômen definidos.
+    # O corpo base é liso; aqui o tronco ganha o desenho de atleta — placa
+    # do peitoral com a borda de baixo marcada, o vão do esterno, a linha
+    # alba e os gomos do abdômen. Vira relevo (mais abaixo) e sombra na cor.
+    mam = pt["mamilo"]
+    my = float(mam[1])
+    ax = np.abs(P[:, 0])
+    yy = P[:, 1]
+    frente_t = suave(0.10, 0.45, N[:, 2]) * (1 - CAB)
+    cy = my + 0.028
+    px = (ax - 0.080) / 0.102
+    py = (yy - cy) / np.where(yy > cy, 0.085, 0.038)
+    # placa larga e achatada (músculo, não volume redondo)
+    pec = np.clip(1 - (np.abs(px) ** 3 + np.abs(py) ** 2.2), 0, 1) ** 0.35 * 0.7
+    esterno = np.exp(-(P[:, 0] / 0.011) ** 2) * suave(my - 0.09, my - 0.05, yy) * (1 - suave(my + 0.08, my + 0.12, yy))
+    faixa_abd = suave(0.088, 0.062, ax) * suave(my - 0.34, my - 0.29, yy) * (1 - suave(my - 0.085, my - 0.055, yy))
+    alba = np.exp(-(P[:, 0] / 0.0075) ** 2)
+    gomos = np.zeros_like(yy)
+    for linha_y in (my - 0.112, my - 0.172, my - 0.236):
+        gomos = np.maximum(gomos, np.exp(-((yy - linha_y) / 0.0075) ** 2))
+    abdomen = faixa_abd * (0.55 - 0.55 * np.maximum(alba, gomos * suave(0.075, 0.05, ax)))
+    anatomia = frente_t * (pec * 1.0 - esterno * 0.55 + abdomen)
+    vale = frente_t * np.clip(esterno * 0.8 + faixa_abd * np.maximum(alba, gomos) * 0.9, 0, 1)
+    cor *= (1.0 - 0.11 * vale + 0.03 * frente_t * pec)[:, None]
 
     # ---- sangue perto da pele: orelhas, nariz, bochechas, joelhos, cotovelos.
     def perto(ponto, raio):
@@ -219,10 +247,10 @@ def pintar_pele(ctx: dict, tam: int = 4096):
     ang = np.arctan2(rel[:, 0], rel[:, 2])  # 0 = frente
     fa = np.cos(ang)
     # linha do cabelo: testa em cima, têmpora, acima da orelha, nuca
-    linha = np.where(fa > 0, pt["testa_y"] - (1 - fa) ** 1.4 * 0.050,
+    linha = np.where(fa > 0, pt["testa_y"] - (1 - fa) ** 1.4 * 0.036,
                      pt["testa_y"] - 0.050 - np.clip(-fa, 0, 1) ** 0.8 * 0.085)
     # entradas discretas nas têmporas
-    linha += 0.008 * np.exp(-((np.abs(ang) - 0.55) / 0.18) ** 2)
+    linha += 0.003 * np.exp(-((np.abs(ang) - 0.55) / 0.18) ** 2)
     orelha_d = np.minimum(np.linalg.norm(P - pt["orelha"], axis=1),
                           np.linalg.norm(P - pt["orelha"] * [-1, 1, 1], axis=1))
     borda = fbm(P, 90.0, 2, 22) * 0.004
@@ -284,13 +312,18 @@ def pintar_pele(ctx: dict, tam: int = 4096):
     altura = (ruido(P, 900.0, 30) * 0.5 + ruido(P, 380.0, 31) * 0.15).reshape(H, H)
     altura += (tinta * ruido(P * [1, 2, 1], 1400.0, 32) * 0.6).reshape(H, H)
     altura = nd.gaussian_filter(altura.astype(np.float32), 0.8)
+    # A anatomia é grande e macia: entra depois do filtro fino, com a sua
+    # própria suavização (sem degraus de pixel).
+    altura += nd.gaussian_filter((anatomia * ANATOMIA_FORCA).reshape(H, H).astype(np.float32), 2.0)
     gy, gx = np.gradient(altura)
     forca = 0.45
     nx, ny = -gx * forca, gy * forca
     nz = np.ones_like(nx)
     ln = np.sqrt(nx * nx + ny * ny + nz * nz)
     rel = np.stack([nx / ln, ny / ln, nz / ln], -1) * 0.5 + 0.5
-    relevo = Image.fromarray((rel * 255 + 0.5).astype(np.uint8), "RGB").resize((tam // 2, tam // 2), Image.LANCZOS)
+    # Relevo na MESMA resolução da cor (antes era a metade, e o peito de
+    # perto ficava com os poros borrados e o brilho em degraus).
+    relevo = Image.fromarray((rel * 255 + 0.5).astype(np.uint8), "RGB")
     return albedo, relevo
 
 

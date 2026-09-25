@@ -28,11 +28,22 @@ extends RefCounted
 ## A moldura inteira, borda incluída. O QUADRO OCUPA A LARGURA TODA: o
 ## lutador e o ringue são o espetáculo, e as colunas laterais de dano
 ## saíram para dar lugar a eles (a vida agora é a barra de cima).
-const MOLDURA := Rect2(28.0, 290.0, 1024.0, 1040.0)
+## A ARENA GRANDE: o quadro ocupa quase a tela inteira, e o que é da
+## luta (as duas vidas no alto, os socos embaixo) mora DENTRO dele, como
+## o painel de um jogo de luta — e não espalhado em volta.
+const MOLDURA := Rect2(14.0, 150.0, 1052.0, 1466.0)
 ## O buraco da moldura: é aqui que a imagem da arena é desenhada.
-const TELA := Rect2(50.0, 312.0, 980.0, 996.0)
-## A BARRA DE VIDA do adversário, acima do quadro, como num jogo de luta.
-const VIDA := Rect2(60.0, 196.0, 960.0, 54.0)
+const TELA := Rect2(36.0, 172.0, 1008.0, 1422.0)
+## AS DUAS VIDAS, dentro do quadro, no alto: a do JOGADOR à esquerda e a
+## do ADVERSÁRIO à direita (espelhada), como num jogo de luta.
+const VIDA_JOGADOR := Rect2(62.0, 232.0, 440.0, 40.0)
+const VIDA := Rect2(578.0, 232.0, 440.0, 40.0)
+## A faixa escura atrás das vidas (legibilidade sobre a torcida).
+const FAIXA_DO_ALTO := Rect2(36.0, 172.0, 1008.0, 128.0)
+## Os painéis dos socos, dentro do quadro, embaixo.
+const PAINEIS_Y := 1452.0
+const PAINEIS_X := 62.0
+const PAINEIS_LARGURA := 956.0
 ## As duas colunas de dano, uma de cada lado da moldura.
 const BARRA_E := Rect2(80.0, 508.0, 48.0, 770.0)
 const BARRA_D := Rect2(952.0, 508.0, 48.0, 770.0)
@@ -140,50 +151,67 @@ static func barras(alvo: CanvasItem, dano: float, tempo: float) -> void:
 ## arrancar. É esse rastro que faz o golpe "doer" na tela.
 const INCLINA := 26.0
 
-static func _faixa(alvo: CanvasItem, x0: float, x1: float, y0: float, y1: float, c0: Color, c1: Color) -> void:
+static func _faixa(alvo: CanvasItem, x0: float, x1: float, y0: float, y1: float, c0: Color, c1: Color, inclina := INCLINA) -> void:
 	if x1 - x0 < 1.0:
 		return
 	var h := y1 - y0
-	var d := INCLINA * h / VIDA.size.y
+	var d := inclina * h / VIDA.size.y
 	alvo.draw_polygon(
 		PackedVector2Array([Vector2(x0 + d, y0), Vector2(x1 + d, y0), Vector2(x1, y1), Vector2(x0, y1)]),
 		PackedColorArray([c0, c1, c1, c0])
 	)
 
-static func vida(alvo: CanvasItem, fonte: Font, vida: float, fantasma: float, tempo: float, rotulo: String) -> void:
-	var r := VIDA
+## `espelho`: a barra enche da DIREITA para a esquerda e inclina para o
+## outro lado — a do adversário, de frente para a do jogador.
+static func vida(alvo: CanvasItem, fonte: Font, vida: float, fantasma: float, tempo: float, rotulo: String,
+		r: Rect2 = VIDA, espelho := false, cor_base := Color(0, 0, 0, 0)) -> void:
 	var v := clampf(vida, 0.0, 1.0)
 	var f := clampf(maxf(fantasma, v), 0.0, 1.0)
-	var x0 := r.position.x
+	var inc := -INCLINA if espelho else INCLINA
 	var larg := r.size.x - INCLINA
+	var x0 := r.position.x + (INCLINA if espelho else 0.0)
 	var y0 := r.position.y
 	var y1 := r.end.y
+	# trecho [a, b] da barra (0 = começo do enchimento) em x de tela
+	var trecho := func(a: float, b: float) -> Vector2:
+		if espelho:
+			return Vector2(x0 + larg * (1.0 - b), x0 + larg * (1.0 - a))
+		return Vector2(x0 + larg * a, x0 + larg * b)
 	# moldura: sombra, aro de ouro e trilho escuro
-	_faixa(alvo, x0 - 10.0, x0 + larg + 10.0, y0 - 7.0, y1 + 7.0, Color(0, 0, 0, 0.55), Color(0, 0, 0, 0.55))
-	_faixa(alvo, x0 - 6.0, x0 + larg + 6.0, y0 - 4.0, y1 + 4.0, OURO_ESC, OURO)
-	_faixa(alvo, x0, x0 + larg, y0, y1, Color("0c0615"), Color("1c1030"))
+	_faixa(alvo, x0 - 10.0, x0 + larg + 10.0, y0 - 7.0, y1 + 7.0, Color(0, 0, 0, 0.55), Color(0, 0, 0, 0.55), inc)
+	_faixa(alvo, x0 - 6.0, x0 + larg + 6.0, y0 - 4.0, y1 + 4.0, OURO_ESC, OURO, inc)
+	_faixa(alvo, x0, x0 + larg, y0, y1, Color("0c0615"), Color("1c1030"), inc)
 	# o rastro do golpe: vermelho vivo que clareia para o branco
 	if f > v:
-		_faixa(alvo, x0 + larg * v, x0 + larg * f, y0, y1, Color("ff3baa"), Color(1, 1, 1, 0.9))
-	# a vida: degradê do tom escuro para o claro da mesma cor
+		var t: Vector2 = trecho.call(v, f)
+		_faixa(alvo, t.x, t.y, y0, y1, Color("ff3baa"), Color(1, 1, 1, 0.9), inc)
 	var cor := Paleta.VERDE.lerp(Paleta.AMBAR, clampf((1.0 - v) / 0.5, 0.0, 1.0))
 	cor = cor.lerp(Paleta.VERMELHO, clampf((0.5 - v) / 0.35, 0.0, 1.0))
+	if cor_base.a > 0.0:
+		cor = cor_base.lerp(Paleta.VERMELHO, clampf((0.45 - v) / 0.35, 0.0, 1.0))
 	if v < 0.25:
 		cor = cor.lerp(Color.WHITE, 0.30 * (0.5 + 0.5 * sin(tempo * 12.0)))
-	_faixa(alvo, x0, x0 + larg * v, y0, y1, cor.darkened(0.35), cor.lightened(0.15))
+	var cheio: Vector2 = trecho.call(0.0, v)
+	var c0 := cor.darkened(0.35)
+	var c1 := cor.lightened(0.15)
+	_faixa(alvo, cheio.x, cheio.y, y0, y1, c1 if espelho else c0, c0 if espelho else c1, inc)
 	# vidro: faixa clara na metade de cima e um reflexo correndo
-	_faixa(alvo, x0, x0 + larg * v, y0, y0 + r.size.y * 0.42, Color(1, 1, 1, 0.26), Color(1, 1, 1, 0.10))
+	_faixa(alvo, cheio.x, cheio.y, y0, y0 + r.size.y * 0.42, Color(1, 1, 1, 0.22), Color(1, 1, 1, 0.10), inc)
 	var brilho := fmod(tempo * 0.45, 1.6) - 0.3
 	if brilho > 0.0 and brilho < v:
-		var bx := x0 + larg * brilho
-		_faixa(alvo, bx, minf(bx + 70.0, x0 + larg * v), y0, y1, Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.35))
+		var b: Vector2 = trecho.call(brilho, minf(brilho + 70.0 / larg, v))
+		_faixa(alvo, b.x, b.y, y0, y1, Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.35), inc)
 	if fonte != null:
-		var base := y0 - 16.0
-		alvo.draw_string_outline(fonte, Vector2(x0, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, 8, ESCURO)
-		alvo.draw_string(fonte, Vector2(x0, base), rotulo, HORIZONTAL_ALIGNMENT_LEFT, r.size.x * 0.7, 30, Color.WHITE)
+		var base := y0 - 14.0
+		var lado_rot := HORIZONTAL_ALIGNMENT_RIGHT if espelho else HORIZONTAL_ALIGNMENT_LEFT
+		var lado_pct := HORIZONTAL_ALIGNMENT_LEFT if espelho else HORIZONTAL_ALIGNMENT_RIGHT
+		var xr := r.position.x
+		alvo.draw_string_outline(fonte, Vector2(xr, base), rotulo, lado_rot, r.size.x, 26, 8, ESCURO)
+		alvo.draw_string(fonte, Vector2(xr, base), rotulo, lado_rot, r.size.x, 26, Color.WHITE)
 		var pct := "%d%%" % int(round(v * 100.0))
-		alvo.draw_string_outline(fonte, Vector2(x0, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 34, 8, ESCURO)
-		alvo.draw_string(fonte, Vector2(x0, base), pct, HORIZONTAL_ALIGNMENT_RIGHT, r.size.x, 34, cor.lightened(0.2))
+		# o número fica na ponta de dentro (perto do centro do quadro)
+		alvo.draw_string_outline(fonte, Vector2(xr, y1 + 34.0), pct, lado_pct, r.size.x, 28, 8, ESCURO)
+		alvo.draw_string(fonte, Vector2(xr, y1 + 34.0), pct, lado_pct, r.size.x, 28, cor.lightened(0.2))
 
 ## A cor que a coluna está mostrando. O texto do medidor usa a mesma,
 ## senão o número e a barra parecem falar de coisas diferentes.

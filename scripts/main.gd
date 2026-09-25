@@ -59,7 +59,7 @@ const MARGEM := 60.0
 ## meio do vazio — é o lutador dentro da moldura, e por isso o ponto saiu
 ## de 930 para o centro de `ArenaQuadro.TELA`. Mexer num sem mexer no
 ## outro faria as faíscas do soco explodirem ao lado de quem apanhou.
-const ALVO_DO_SOCO := Vector2(540.0, 810.0)
+const ALVO_DO_SOCO := Vector2(540.0, 880.0)
 const LARGURA_UTIL := TELA.x - MARGEM * 2.0
 
 ## As cores que voam. Saem da paleta porque confete branco, que num
@@ -796,6 +796,17 @@ const KO_DURACAO := 3.2
 const SOCO_NA_TELA_PRIMEIRO := Vector2(6.5, 8.5)
 const SOCO_NA_TELA_DEPOIS := Vector2(7.5, 11.0)
 var _soco_na_tela_em := 7.0
+
+## A VIDA DO JOGADOR — é o TEMPO dele. Na espera do soco ela escorre aos
+## poucos, e cada soco que o lutador dá na tela arranca um pedaço. Zerou,
+## o jogador é nocauteado: a luva final, "K.O.", a câmera vai ao chão e a
+## rodada acaba em derrota (a ficha não volta). Enche de novo a cada rodada.
+var vida_jogador := 1.0
+var _vida_jogador_fantasma := 1.0
+var _jogador_nocauteado := false
+var _fim_por_nocaute := -1.0
+const VIDA_DRENO_POR_SEGUNDO := 1.0 / 45.0
+const DANO_DO_SOCO_NA_TELA := 0.15
 ## O CAMBALEIO depois do soco na tela: a câmera da arena balança e o
 ## balanço morre devagar, com uma rachadura no vidro do quadro. Tudo
 ## sorteado a cada vez (nunca sai igual) e sempre liso, sem travar.
@@ -1234,10 +1245,12 @@ func _process(delta: float) -> void:
 		arena.ligar(_arena_no_ar())
 		arena.avancar(passo)
 		if arena.tela_atingida():
-			if state == GameDef.State.ARMED:
-				_levar_soco_na_tela()
-			elif _ko_a_caminho >= 0.0:
+			# O nocaute vem primeiro: a luva final também chega na espera
+			# do soco, quando a vida do jogador acaba.
+			if _ko_a_caminho >= 0.0:
 				_levar_ko()
+			elif state == GameDef.State.ARMED:
+				_levar_soco_na_tela()
 	_socorro_da_camera(passo)
 	if camera_service != null:
 		camera_service.definir_ritmo(_ritmo_da_camera())
@@ -1466,6 +1479,21 @@ func _processar_contagem(delta: float) -> void:
 		moldura.set_estado(LedFrame.ARMADA)
 
 func _processar_armado(delta: float) -> void:
+	_passo_do_ko(delta)
+	if _jogador_nocauteado:
+		# No chão: espera a luva, o "K.O." e a queda, e encerra a rodada.
+		if _fim_por_nocaute >= 0.0:
+			_fim_por_nocaute -= delta
+			if _fim_por_nocaute < 0.0:
+				_fim_por_nocaute = -1.0
+				_entrar_em_resultado(true)
+		return
+	# A VIDA ESCORRE enquanto ele não bate (ver `vida_jogador`).
+	if not golpe_registrado:
+		vida_jogador = maxf(0.0, vida_jogador - delta * VIDA_DRENO_POR_SEGUNDO)
+		if vida_jogador <= 0.0:
+			_nocaute_do_jogador()
+			return
 	espera_left -= delta
 	# QUEM DEMORA LEVA. De tempos em tempos o lutador avança e soca a
 	# câmera: é o jeito de a máquina dizer "vai, bate logo".
@@ -2141,6 +2169,12 @@ func _iniciar_rodada() -> void:
 		credits -= 1
 		credito_gasto = true
 	rodada_encerrada_antecipadamente = false
+	vida_jogador = 1.0
+	_vida_jogador_fantasma = 1.0
+	_jogador_nocauteado = false
+	_fim_por_nocaute = -1.0
+	if arena != null:
+		arena.jogador_no_chao(false)
 	# O SACO DESCE AGORA, no 3-2-1, e não no primeiro soco: o curso leva
 	# três segundos e meio, que é exatamente o tempo da contagem. Quem
 	# está na frente da máquina vê o saco baixando enquanto conta, e o
@@ -2221,6 +2255,8 @@ func _devolver_credito() -> void:
 	_show_notice("TEMPO ESGOTADO — CRÉDITO DEVOLVIDO  •  SALDO %02d" % credits)
 
 func _entrar_em_abertura() -> void:
+	if arena != null:
+		arena.jogador_no_chao(false)
 	# A volta para a abertura também é uma troca de tela, e sem cortina
 	# ela era a mais seca de todas: o Top 20 sumia e a marca aparecia.
 	if not intro_active:
@@ -2484,9 +2520,12 @@ func _levar_ko() -> void:
 	tremor = maxf(tremor, 40.0)
 	clarao = maxf(clarao, 0.30)
 	_ko_t = 0.0
-	arena_frase = ArenaFrases.de_derrota(plays)
+	if not _jogador_nocauteado:
+		arena_frase = ArenaFrases.de_derrota(plays)
 	if arena != null:
 		arena.agitar(0.55, 7.0)
+		# QUEM LEVOU O NOCAUTE VAI AO CHÃO: a câmera cai até a lona.
+		arena.jogador_no_chao(true)
 
 ## O "K.O." na tela, dentro do quadro da arena: pisca em vermelho, cresce
 ## num tranco e assenta; embaixo, quem ganhou a luta.
@@ -2517,6 +2556,14 @@ func _fechar_desfecho() -> void:
 	var melhor := 0
 	for soco in socos:
 		melhor = maxi(melhor, int(soco["pontos"]))
+	if _jogador_nocauteado:
+		# Já foi nocauteado (a vida acabou): derrota, sem outro soco final
+		# — o lutador comemora por cima de quem está no chão, e a vaia.
+		desfecho = "derrota"
+		if arena != null:
+			arena.fim_de_rodada(desfecho)
+		sons.play("torcida_vaia", -3.0)
+		return
 	if _nocaute_na_rodada:
 		desfecho = "nocaute"
 	elif melhor >= 6500:
@@ -2768,7 +2815,25 @@ func _draw_ensaio() -> void:
 # ======================================================================
 ## A luva do lutador "acertou" o vidro: som, tranco, rachadura e o
 ## cambaleio sorteado.
+## A vida do jogador acabou: o lutador vem para o soco final.
+func _nocaute_do_jogador() -> void:
+	if _jogador_nocauteado:
+		return
+	_jogador_nocauteado = true
+	vida_jogador = 0.0
+	golpe_registrado = true   # nenhum soco conta mais nesta rodada
+	sons.stop("torcida_incentivo")
+	arena_frase = "VOCÊ DEMOROU… E ELE NÃO PERDOOU!"
+	_ko_em = 0.15
+	# luva a caminho (até 2,2 s) + "K.O." + a queda assentando
+	_fim_por_nocaute = 0.15 + 2.2 + KO_DURACAO + 0.6
+
 func _levar_soco_na_tela() -> void:
+	# CADA SOCO DO LUTADOR TIRA VIDA DE QUEM ESTÁ DEMORANDO.
+	if state == GameDef.State.ARMED and not _jogador_nocauteado:
+		vida_jogador = maxf(0.0, vida_jogador - DANO_DO_SOCO_NA_TELA)
+		if vida_jogador <= 0.0:
+			_nocaute_do_jogador()
 	sons.play("hit", 2.0)
 	sons.play("subgrave", -2.0)
 	sons.play("arena_corpo", 0.0)
@@ -5321,14 +5386,12 @@ func _draw_partida() -> void:
 	# O cabeçalho da rodada é o MESMO letreiro do cabeçalho da abertura,
 	# no mesmo corpo: são a mesma máquina, e a pessoa não deve sentir que
 	# trocou de programa ao apertar START.
-	ArcadeStage.imagem(self, ArcadeStage.LOGO, Vector2(540.0, 98.0), 250.0)
+	# Com a arena grande, o letreiro fica no alto, menor, acima do quadro.
+	ArcadeStage.imagem(self, ArcadeStage.LOGO, Vector2(540.0, 76.0), 220.0)
 	# A marca acompanha a rodada inteira, à direita e discreta — menos na
 	# contagem, onde ela é desenhada ao lado do visor da foto.
 	if state != GameDef.State.COUNTDOWN:
-		# A marca desceu 60 px em relação à versão original: os cartões dos
-		# socos e a colocação no ranking passaram a terminar mais embaixo
-		# depois que a arena tomou o meio da tela.
-		_marca_lateral(1828.0, 0.70, 66.0)
+		_marca_lateral(1878.0, 0.70, 60.0)
 	match state:
 		GameDef.State.COUNTDOWN:
 			_texto_arcade("FAÇA SUA POSE", 340.0, 72, Paleta.CIANO, LARGURA_UTIL)
@@ -5425,7 +5488,22 @@ func _draw_arena() -> void:
 	var estado := ArenaFrases.de_dano(dano)
 	if arena != null and arena.na_lona():
 		estado = "NA LONA"
-	ArenaQuadro.vida(self, fonte, vida_real, _vida_fantasma, animation_time, "ADVERSÁRIO  •  %s" % estado)
+	# O PAINEL DE LUTA DENTRO DO QUADRO: faixa escura no alto, a vida do
+	# JOGADOR à esquerda (o tempo dele — ver `vida_jogador`) e a do
+	# ADVERSÁRIO à direita, espelhada, de frente uma para a outra.
+	var alto := ArenaQuadro.FAIXA_DO_ALTO
+	draw_rect(alto, Color(0.02, 0.0, 0.06, 0.55))
+	draw_rect(Rect2(alto.position.x, alto.end.y, alto.size.x, 18.0), Color(0.02, 0.0, 0.06, 0.25))
+	if vida_jogador > _vida_jogador_fantasma:
+		_vida_jogador_fantasma = vida_jogador
+	_vida_jogador_fantasma = move_toward(_vida_jogador_fantasma, vida_jogador, get_process_delta_time() * 0.45)
+	var eu := "VOCÊ" if not _jogador_nocauteado else "VOCÊ  •  NOCAUTEADO"
+	ArenaQuadro.vida(self, fonte, vida_jogador, _vida_jogador_fantasma, animation_time, eu,
+		ArenaQuadro.VIDA_JOGADOR, false, Color("3ec8ff"))
+	ArenaQuadro.vida(self, fonte, vida_real, _vida_fantasma, animation_time, "ADVERSÁRIO  •  %s" % estado,
+		ArenaQuadro.VIDA, true)
+	# o round no meio, entre as duas barras
+	_texto_cabendo("R%d" % mini(socos.size() + 1, SOCOS_POR_RODADA), 268.0, 34, Paleta.AMBAR, 60.0, 510.0)
 
 ## A TELA QUE ESPERA O SOCO.
 ##
@@ -5455,35 +5533,34 @@ func _draw_espera_do_soco() -> void:
 	draw_set_transform(Vector2(base_x, 0.0), 0.0, Vector2.ONE)
 	# O ROUND, na barra de baixo da moldura. É a única informação que
 	# cabe ali e a única que a pessoa quer no instante anterior ao soco.
-	_letreiro_centrado(
-		"ROUND %d DE %d" % [socos.size() + 1, SOCOS_POR_RODADA],
-		ArenaQuadro.MOLDURA.end.y - 14.0, _corpo(24), Paleta.TINTA_FRACA, fonte_texto
-	)
 	var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
 	var chamada := "SOQUE AGORA!" if socos.is_empty() else "AGORA O SEGUNDO!"
 	var fraco := animation_time < _fraco_ate
-	if fraco:
+	if _jogador_nocauteado:
+		_texto_arcade("VOCÊ CAIU!", 1690.0, 88, Paleta.VERMELHO, LARGURA_UTIL)
+		_rotulo("A VIDA ACABOU  •  ELE NÃO ESPEROU", 1744.0, Color.WHITE)
+	elif fraco:
 		var tremor := sin(animation_time * 60.0) * 6.0 * clampf(_fraco_ate - animation_time - 1.4, 0.0, 1.0)
 		draw_set_transform(Vector2(base_x + tremor, 0.0), 0.0, Vector2.ONE)
-		_texto_arcade("MAIS FORTE!", 1412.0, 96, Paleta.AMBAR, LARGURA_UTIL)
+		_texto_arcade("MAIS FORTE!", 1690.0, 88, Paleta.AMBAR, LARGURA_UTIL)
 		draw_set_transform(Vector2(base_x, 0.0), 0.0, Vector2.ONE)
-		_rotulo("ESSE NÃO PONTUOU  •  BATA DE NOVO", 1470.0, Color.WHITE)
+		_rotulo("ESSE NÃO PONTUOU  •  BATA DE NOVO", 1744.0, Color.WHITE)
 	else:
-		_texto_arcade(chamada, 1412.0, 88, Color(Color.WHITE, piscada), LARGURA_UTIL)
-		_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1470.0, Color.WHITE)
+		_texto_arcade(chamada, 1690.0, 84, Color(Color.WHITE, piscada), LARGURA_UTIL)
+		_rotulo("ACERTE O ALVO ANTES QUE ELE TE ACERTE", 1744.0, Color.WHITE)
 	# A PROVOCAÇÃO DA ARENA. Ela não repete a instrução de cima: a
 	# instrução diz o que fazer, esta diz por que vale a pena. É a voz do
 	# jogo, e é o que um cartaz de console antigo teria aqui.
 	_texto_cabendo(
-		ArenaFrases.de_espera(socos.size() + int(plays)), 1528.0, 40,
+		ArenaFrases.de_espera(socos.size() + int(plays)), 1796.0, 38,
 		Paleta.AMBAR, LARGURA_UTIL
 	)
-	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1580.0, Paleta.TINTA_FRACA)
+	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1840.0, Paleta.TINTA_FRACA)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# Os dois socos ficam à vista DURANTE a espera: é enquanto se prepara
 	# para bater que saber o que o primeiro valeu muda alguma coisa. Na
 	# MESMA altura do resultado: na troca eles não se mexem.
-	_draw_cartoes_dos_socos(1618.0, false)
+	_draw_cartoes_dos_socos(ArenaQuadro.PAINEIS_Y, false)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
@@ -5493,7 +5570,7 @@ func _draw_espera_do_soco() -> void:
 	# aviso vira ameaça.
 	if espera_left <= GameDef.AVISO_DE_VOLTA:
 		var segundos := maxi(0, int(ceil(espera_left)))
-		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1800.0, Color.WHITE)
+		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1886.0, Color.WHITE)
 
 ## O FAROL E O ALVO: anéis saindo do ponto do soco, em batidas.
 ##
@@ -5520,7 +5597,7 @@ func _draw_farol(cor: Color, forca := 1.0) -> void:
 	# acerta" apontando para a arena, e não para um ponto no vazio — e
 	# respiram, para não virarem um enfeite parado.
 	var respiro := 0.5 + 0.5 * sin(animation_time * 2.2)
-	var folga := lerpf(16.0, 30.0, respiro)
+	var folga := lerpf(2.0, 10.0, respiro)
 	var m := ArenaQuadro.MOLDURA.grow(folga)
 	for sx in [0.0, 1.0]:
 		for sy in [0.0, 1.0]:
@@ -5543,15 +5620,15 @@ func _draw_troca_saindo(s: float) -> void:
 		var c := PLACA_DO_PLACAR.get_center()
 		draw_set_transform(c * (1.0 - k), 0.0, Vector2(k, k))
 		_cartao(PLACA_DO_PLACAR, Color("140c21"), _troca_cor, 1.0, 4.0)
-		_placar(_troca_placar, Vector2(540.0, 1296.0), Color.WHITE, PLACAR_NA_ARENA)
+		_placar(_troca_placar, CENTRO_DO_PLACAR, Color.WHITE, PLACAR_NA_ARENA)
 		var vt := verdict_time
 		verdict_time = 0.0
 		_draw_barra_de_pontuacao(_troca_progresso, 1.0, _troca_cor, false)
 		verdict_time = vt
 	if not _troca_nome.is_empty():
 		draw_set_transform(Vector2(-vai * TELA.x, 0.0), 0.0, Vector2.ONE)
-		var topo_f := 1418.0
-		var base_f := 1580.0
+		var topo_f := VEREDITO_TOPO
+		var base_f := VEREDITO_BASE
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(0.0, topo_f + 18.0), Vector2(TELA.x, topo_f - 18.0),
 			Vector2(TELA.x, base_f - 18.0), Vector2(0.0, base_f + 18.0),
@@ -5815,7 +5892,12 @@ func _pontos_do_capitulo(capitulo: int, alpha := 1.0) -> void:
 		draw_circle(centro, 8.0 if atual else 5.0, Color(cor, alpha), true, -1.0, true)
 
 ## A PLAQUETA DO PLACAR, montada a cavaleiro na borda de baixo da moldura.
-const PLACA_DO_PLACAR := Rect2(268.0, 1232.0, 544.0, 186.0)
+const PLACA_DO_PLACAR := Rect2(268.0, 1214.0, 544.0, 200.0)
+## O centro do número dentro da plaqueta.
+const CENTRO_DO_PLACAR := Vector2(540.0, 1276.0)
+## A faixa do veredito, abaixo do quadro.
+const VEREDITO_TOPO := 1626.0
+const VEREDITO_BASE := 1788.0
 const PLACAR_NA_ARENA := 128
 
 func _draw_score_hero() -> void:
@@ -5846,7 +5928,7 @@ func _draw_score_hero() -> void:
 	_cartao(PLACA_DO_PLACAR, Color("140c21"), cor, 1.0, 4.0)
 	_placar(
 		"– – – –" if measuring else "%04d" % int(round(displayed_score)),
-		Vector2(540.0, 1296.0), cor if measuring else Color.WHITE, PLACAR_NA_ARENA
+		CENTRO_DO_PLACAR, cor if measuring else Color.WHITE, PLACAR_NA_ARENA
 	)
 	_draw_barra_de_pontuacao(progresso, progresso_contagem, cor, measuring)
 
@@ -5856,8 +5938,8 @@ func _draw_score_hero() -> void:
 		# faixa inclinada por trás dá contraste a qualquer cor, sem mudar
 		# a identidade de nenhum nível.
 		var abre_faixa := clampf(verdict_time / 0.25, 0.0, 1.0)
-		var topo_f := 1418.0
-		var base_f := 1580.0
+		var topo_f := VEREDITO_TOPO
+		var base_f := VEREDITO_BASE
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(0.0, topo_f + 18.0), Vector2(TELA.x, topo_f - 18.0),
 			Vector2(TELA.x, base_f - 18.0), Vector2(0.0, base_f + 18.0),
@@ -5867,26 +5949,29 @@ func _draw_score_hero() -> void:
 		# O NOME DO NÍVEL VEM ANTES DA COLOCAÇÃO. A pessoa quer saber o
 		# que ela fez — "NOCAUTE" — e só depois onde isso a coloca. A
 		# ordem inversa transformava o veredito numa tabela.
-		_texto_arcade(ScoreTier.nome_de(result_score), 1490.0, 78, cor, LARGURA_UTIL)
+		if _jogador_nocauteado:
+			_texto_arcade("VOCÊ PERDEU", 1696.0, 78, Paleta.VERMELHO, LARGURA_UTIL)
+		else:
+			_texto_arcade(ScoreTier.nome_de(result_score), 1696.0, 78, cor, LARGURA_UTIL)
 		# E A FRASE VEM DEPOIS DO NOME. O nome é a nota; a frase é o
 		# locutor. Sem ela o veredito volta a ser uma etiqueta — com ela
 		# a máquina parece ter visto o soco acontecer.
 		if not arena_frase.is_empty():
-			_texto_cabendo(arena_frase, 1556.0, 44, Paleta.AMBAR, LARGURA_UTIL)
+			_texto_cabendo(arena_frase, 1760.0, 42, Paleta.AMBAR, LARGURA_UTIL)
 		# OS DOIS SOCOS CONTINUAM À VISTA NO RESULTADO, com o que deu a
 		# nota marcado. MELHOR só existe quando há com quem comparar: no
 		# resultado do primeiro soco ele é o melhor porque é o único.
-		_draw_cartoes_dos_socos(1618.0, socos.size() >= SOCOS_POR_RODADA)
+		_draw_cartoes_dos_socos(ArenaQuadro.PAINEIS_Y, socos.size() >= SOCOS_POR_RODADA)
 		if posicao_no_ranking > 0:
-			_apoio("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1800.0, Paleta.AMBAR)
+			_apoio("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1840.0, Paleta.AMBAR)
 		elif _rodada_terminou() and result_score < RankingStore.MINIMO:
-			_apoio("O TOP 20 COMEÇA EM %d PONTOS" % RankingStore.MINIMO, 1800.0, Paleta.TINTA_FRACA)
+			_apoio("O TOP 20 COMEÇA EM %d PONTOS" % RankingStore.MINIMO, 1840.0, Paleta.TINTA_FRACA)
 
 ## Barra segmentada de leitura instantânea. Segmentos são mais fáceis de
 ## comparar à distância que um retângulo contínuo e não criam partículas,
 ## shaders ou nós novos por quadro.
 func _draw_barra_de_pontuacao(valor: float, contagem: float, cor: Color, medindo: bool) -> void:
-	var trilho := Rect2(304.0, 1352.0, 472.0, 26.0)
+	var trilho := Rect2(304.0, PLACA_DO_PLACAR.position.y + 118.0, 472.0, 24.0)
 	_cartao(trilho.grow(6.0), Color("0f0a18"), Color(cor, 0.34), 1.0, 2.0)
 	var segmentos := 24
 	var vao := 3.0
@@ -5908,7 +5993,7 @@ func _draw_barra_de_pontuacao(valor: float, contagem: float, cor: Color, medindo
 		var cursor_x := trilho.position.x + trilho.size.x * valor
 		draw_rect(Rect2(cursor_x - 2.0, trilho.position.y - 4.0, 4.0, trilho.size.y + 8.0), Color.WHITE)
 	var rotulo := "LENDO SENSOR" if medindo else ("PONTOS CONFIRMADOS" if verdict_time >= 0.0 else "ANALISANDO • %02d%%" % int(contagem * 100.0))
-	_apoio(rotulo, 1412.0, cor)
+	_apoio(rotulo, PLACA_DO_PLACAR.end.y - 18.0, cor)
 
 ## O CARREGANDO: UM ANEL QUE GIRA E UMA FRASE DO QUE ESTÁ ACONTECENDO.
 ##
@@ -5976,7 +6061,7 @@ const PLACAR_CORPO := 190
 func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 	const ALTURA := 124.0
 	const VAO := 24.0
-	var largura := (LARGURA_UTIL - VAO) * 0.5
+	var largura := (ArenaQuadro.PAINEIS_LARGURA - VAO) * 0.5
 	# Qual soco vale a nota da rodada: o primeiro dos empatados, para a
 	# marca não pular de um cartão para o outro entre dois quadros.
 	var melhor_i := -1
@@ -5987,9 +6072,10 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 			melhor_i = i
 
 	for i in SOCOS_POR_RODADA:
-		var rect := Rect2(MARGEM + float(i) * (largura + VAO), y, largura, ALTURA)
+		var rect := Rect2(ArenaQuadro.PAINEIS_X + float(i) * (largura + VAO), y, largura, ALTURA)
 		var feito := i < socos.size()
-		var esperando := (not feito) and i == socos.size() and state == GameDef.State.ARMED
+		var esperando := (not feito) and i == socos.size() and state == GameDef.State.ARMED \
+			and not _jogador_nocauteado
 		var eh_melhor := marcar_melhor and feito and i == melhor_i
 
 		var cor := Paleta.TINTA_LEVE
