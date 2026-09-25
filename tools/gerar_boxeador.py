@@ -470,7 +470,11 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
         d = _uniao(d, dorso, 0.025 * s)
         d = _uniao(d, polegar, 0.009 * s)
         d = _uniao(d, cano, 0.035 * s)
-        return np.minimum(d, faixa)
+        # O punho termina num corte reto e FECHADO: antes a ponta do cano
+        # passava da caixa da malha e o punho saía aberto — de lado dava
+        # para ver a luva por dentro, oca.
+        corte = -(P[..., 2] + 0.092 * s)
+        return -_uniao(-np.minimum(d, faixa), -corte, 0.008 * s)
 
     loc, faces, nrm = _malha_do_campo(campo, A(-0.085, -0.085, -0.10), A(0.085, 0.085, 0.215), 0.0058 * s)
     z = loc[:, 2] / s
@@ -480,7 +484,8 @@ def luva(pulso, junta, dedao, palma_n, lado, eixo_do_antebraco):
     cor[faixa] = [0.70, 0.02, 0.05]                              # velcro vermelho
     for a, b in ((-0.046, -0.042), (-0.031, -0.027)):
         cor[(z > a) & (z < b)] = [0.95, 0.95, 0.94]              # frisos brancos
-    cor[z < -0.074] = [0.12, 0.10, 0.12]                          # borda do punho
+    cor[(z < -0.074) & (z > -0.084)] = [0.12, 0.10, 0.12]         # borda do punho
+    cor[z <= -0.084] = [0.86, 0.86, 0.85]                         # tampa do punho
     # Palma um pouco mais escura, em degradê (a mancha chapada de antes
     # parecia um buraco na luva).
     palma = np.clip((loc[:, 1] / s - 0.030) / 0.030, 0, 1) * np.clip((z - 0.03) / 0.03, 0, 1)
@@ -685,36 +690,29 @@ def cinturao(cv, cintura, pesos_de):
 
 
 def textura_do_cinturao(largura=2048, altura=256):
-    img = Image.new("RGB", (largura, altura), (0, 0, 0))
+    """A TIRA DO CINTURÃO DE CAMPEÃO: couro preto com bordas douradas,
+    costura vermelha, rebites de ouro e as placas laterais com estrela. A
+    placa grande da frente é peça própria (`placa_do_cinturao`)."""
+    rng_ = np.random.default_rng(3)
     a = np.linspace(0, 1, altura)[:, None]
-    ouro = np.array([226, 168, 34]) * (0.82 + 0.3 * np.sin(a * np.pi)) + np.array([30, 20, 0]) * a
-    arr = np.broadcast_to(ouro[:, None, :], (altura, largura, 3)).copy()
-    arr += np.random.default_rng(3).normal(0, 4, arr.shape)
+    couro = np.array([22, 18, 24]) * (0.85 + 0.35 * np.sin(a * np.pi))
+    arr = np.broadcast_to(couro[:, None, :], (altura, largura, 3)).copy()
+    grao = nd.gaussian_filter(rng_.normal(0, 1, (altura, largura)), 1.2)
+    arr += (grao * 6)[..., None]
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
     d = ImageDraw.Draw(img)
-    # frisos: magenta e branco em cima e embaixo
-    for y, h, c in ((0, 14, (40, 10, 70)), (14, 10, (255, 255, 255)), (24, 6, (255, 42, 176)),
-                    (altura - 30, 6, (255, 42, 176)), (altura - 24, 10, (255, 255, 255)), (altura - 14, 14, (40, 10, 70))):
+    ouro_c, ouro_e = (238, 190, 60), (150, 100, 20)
+    for y, h, c in ((0, 16, ouro_e), (4, 8, ouro_c), (altura - 16, 16, ouro_e), (altura - 12, 8, ouro_c)):
         d.rectangle([0, y, largura, y + h], fill=c)
-    # costura tracejada
-    for y in (40, altura - 44):
-        for x in range(0, largura, 22):
-            d.line([x, y, x + 12, y], fill=(120, 80, 10), width=3)
-    fonte = ImageFont.truetype(FONTE, 118)
-    fonte2 = ImageFont.truetype(str(RAIZ / "assets" / "fonts" / "SairaCondensed-ExtraBold.ttf"), 96)
-
-    def escreve(texto, cx, f, cor_, contorno):
-        caixa = d.textbbox((0, 0), texto, font=f)
-        x = cx - (caixa[2] - caixa[0]) / 2
-        y = altura / 2 - (caixa[3] + caixa[1]) / 2
-        for dx in range(-4, 5, 2):
-            for dy in range(-4, 5, 2):
-                d.text((x + dx, y + dy), texto, font=f, fill=contorno)
-        d.text((x, y), texto, font=f, fill=cor_)
-
-    escreve("SUPER BOXING", largura * 0.5, fonte, (150, 8, 30), (255, 240, 200))
-    escreve("LAZER SPORT", largura * 0.0 + 1, fonte2, (40, 10, 70), (255, 240, 200))
-    escreve("LAZER SPORT", largura * 1.0 - 1, fonte2, (40, 10, 70), (255, 240, 200))
+    for y in (30, altura - 34):
+        for x in range(0, largura, 20):
+            d.line([x, y, x + 11, y], fill=(190, 20, 40), width=3)
+    # rebites dourados ao longo da tira
+    for x in range(40, largura, 80):
+        for y in (58, altura - 60):
+            d.ellipse([x - 9, y - 9, x + 9, y + 9], fill=ouro_e)
+            d.ellipse([x - 7, y - 7, x + 5, y + 5], fill=ouro_c)
+            d.ellipse([x - 4, y - 5, x, y - 1], fill=(255, 245, 200))
 
     def estrela(cx, cy, r, c):
         pts = []
@@ -722,13 +720,135 @@ def textura_do_cinturao(largura=2048, altura=256):
             ang = -np.pi / 2 + k * np.pi / 5
             rr = r if k % 2 == 0 else r * 0.45
             pts.append((cx + np.cos(ang) * rr, cy + np.sin(ang) * rr))
-        d.polygon(pts, fill=c, outline=(60, 20, 10))
+        d.polygon(pts, fill=c, outline=(90, 50, 10))
 
-    for cx in (largura * 0.25, largura * 0.75):
-        estrela(cx, altura / 2, 52, (255, 255, 255))
-        estrela(cx - 110, altura / 2, 30, (150, 8, 30))
-        estrela(cx + 110, altura / 2, 30, (150, 8, 30))
+    # placas laterais: medalhão dourado com estrela vermelha
+    for cx in (largura * 0.30, largura * 0.70, largura * 0.12, largura * 0.88):
+        d.rounded_rectangle([cx - 95, 40, cx + 95, altura - 40], 28, fill=ouro_e)
+        d.rounded_rectangle([cx - 86, 48, cx + 86, altura - 48], 22, fill=ouro_c)
+        estrela(cx, altura / 2, 58, (170, 12, 32))
+        estrela(cx, altura / 2, 30, (255, 236, 170))
+    fonte2 = ImageFont.truetype(str(RAIZ / "assets" / "fonts" / "SairaCondensed-ExtraBold.ttf"), 84)
+    for cx in (0, largura):
+        caixa = d.textbbox((0, 0), "LAZER SPORT", font=fonte2)
+        x = cx - (caixa[2] - caixa[0]) / 2
+        yv = altura / 2 - (caixa[3] + caixa[1]) / 2
+        d.text((x, yv), "LAZER SPORT", font=fonte2, fill=ouro_c)
     return img
+
+
+def textura_da_placa(largura=1024, altura=768):
+    """A PLACA DO CINTURÃO: ouro com brilho, aro com pedras vermelhas e o
+    logo SUPER BOXING no meio, em relevo (sombra e luz pintadas)."""
+    yy, xx = np.mgrid[0:altura, 0:largura].astype(np.float32)
+    u = (xx / largura - 0.5) * 2
+    v = (yy / altura - 0.5) * 2
+    r = np.sqrt(u * u + v * v)
+    luz = 0.78 + 0.35 * np.clip(-v * 0.6 - u * 0.3, -1, 1) + 0.15 * np.cos(r * 9.0)
+    ouro = np.stack([236 * luz, 178 * luz, 56 * luz], -1)
+    # aro: faixa mais escura e gravada perto da borda
+    aro = (r > 0.80) & (r < 0.92)
+    ouro[aro] *= 0.72
+    ouro[(r > 0.92)] *= 0.55
+    # raios gravados atrás do logo
+    ang = np.arctan2(v, u)
+    raios = (np.sin(ang * 24) > 0.6) & (r < 0.80) & (r > 0.25)
+    ouro[raios] *= 0.90
+    img = Image.fromarray(np.clip(ouro, 0, 255).astype(np.uint8))
+    d = ImageDraw.Draw(img)
+    # pedras vermelhas no aro
+    for k in range(16):
+        a_ = 2 * np.pi * k / 16
+        cx = largura / 2 + np.cos(a_) * largura / 2 * 0.86
+        cy = altura / 2 + np.sin(a_) * altura / 2 * 0.86
+        d.ellipse([cx - 16, cy - 16, cx + 16, cy + 16], fill=(90, 0, 10))
+        d.ellipse([cx - 12, cy - 12, cx + 10, cy + 10], fill=(210, 20, 45))
+        d.ellipse([cx - 7, cy - 8, cx - 2, cy - 3], fill=(255, 190, 200))
+    logo = Image.open(RAIZ / "assets" / "logos" / "superboxing_h512.png").convert("RGBA")
+    alvo_l = int(largura * 0.66)
+    logo = logo.resize((alvo_l, int(logo.size[1] * alvo_l / logo.size[0])), Image.LANCZOS)
+    sombra = Image.new("RGBA", logo.size, (40, 20, 0, 0))
+    sombra.putalpha(logo.getchannel("A").point(lambda x: int(x * 0.7)))
+    ox = (largura - logo.size[0]) // 2
+    oy = (altura - logo.size[1]) // 2 - 10
+    img.paste(sombra, (ox + 8, oy + 10), sombra)
+    img.paste(logo, (ox, oy), logo)
+    fonte = ImageFont.truetype(str(RAIZ / "assets" / "fonts" / "SairaCondensed-ExtraBold.ttf"), 64)
+    caixa = d.textbbox((0, 0), "CAMPEÃO", font=fonte)
+    x = (largura - (caixa[2] - caixa[0])) / 2
+    y0 = oy + logo.size[1] - 6
+    d.text((x + 3, y0 + 3), "CAMPEÃO", font=fonte, fill=(90, 50, 5))
+    d.text((x, y0), "CAMPEÃO", font=fonte, fill=(255, 240, 190))
+    return img
+
+
+def placa_do_cinturao(cp, cintura, pesos_de):
+    """A placa grande da frente do cinturão: oval de ouro, levemente curva
+    acompanhando a barriga, com espessura (aro) — peça sólida."""
+    altura_cinto = 0.066
+    y_meio = cintura - altura_cinto * 0.5 + 0.004
+    frente = cp[np.abs(cp[:, 0]) < 0.02]
+    frente = frente[np.abs(frente[:, 1] - y_meio) < 0.02]
+    z_frente = float(frente[:, 2].max())
+    zona = cp[np.abs(cp[:, 1] - y_meio) < 0.02]
+    centro_z = float((zona[:, 2].max() + zona[:, 2].min()) * 0.5)
+    raio = z_frente - centro_z + 0.010
+    meia_l, meia_a = 0.105, 0.070
+    esp = 0.012
+    aneis, lados = 14, 72
+    P, UV = [], []
+
+    def ponto(x, y, recuo):
+        # curva em volta do corpo (cilindro vertical de raio `raio`)
+        a_ = x / raio
+        rr = raio - recuo
+        return [np.sin(a_) * rr, y_meio + y, centro_z + np.cos(a_) * rr]
+
+    # frente: anéis de dentro para fora, contorno superelíptico
+    P.append(ponto(0.0, 0.0, -0.004))
+    UV.append([0.5, 0.5])
+    for i in range(1, aneis + 1):
+        t = i / aneis
+        bojo = 0.004 * (1 - t * t)
+        for k in range(lados):
+            a_ = 2 * np.pi * k / lados
+            c, s_ = np.cos(a_), np.sin(a_)
+            ex = np.sign(c) * abs(c) ** 0.7
+            ey = np.sign(s_) * abs(s_) ** 0.7
+            x, y = ex * meia_l * t, ey * meia_a * t
+            P.append(ponto(x, y, -bojo))
+            UV.append([0.5 + ex * t * 0.5, 0.5 - ey * t * 0.5])
+    F = []
+    for k in range(lados):
+        F.append([0, 1 + k, 1 + (k + 1) % lados])
+    for i in range(aneis - 1):
+        b0, b1 = 1 + i * lados, 1 + (i + 1) * lados
+        for k in range(lados):
+            k1 = (k + 1) % lados
+            F += [[b0 + k, b1 + k, b1 + k1], [b0 + k, b1 + k1, b0 + k1]]
+    # aro: borda da frente descendo até as costas da placa
+    ult = 1 + (aneis - 1) * lados
+    base_aro = len(P)
+    for k in range(lados):
+        x, y, z = P[ult + k]
+        a_ = 2 * np.pi * k / lados
+        c, s_ = np.cos(a_), np.sin(a_)
+        ex = np.sign(c) * abs(c) ** 0.7
+        ey = np.sign(s_) * abs(s_) ** 0.7
+        P.append(ponto(ex * meia_l, ey * meia_a, esp))
+        UV.append([0.5 + ex * 0.49, 0.5 - ey * 0.49])
+    for k in range(lados):
+        k1 = (k + 1) % lados
+        F += [[ult + k, base_aro + k, base_aro + k1], [ult + k, base_aro + k1, ult + k1]]
+    P = np.array(P, np.float32)
+    F = np.array(F, np.uint32)
+    # frente virada para fora: confere o sentido pelo primeiro triângulo
+    n0 = np.cross(P[F[0, 1]] - P[F[0, 0]], P[F[0, 2]] - P[F[0, 0]])
+    if n0[2] < 0:
+        F = F[:, ::-1].copy()
+    n = normais(P.astype(np.float64), F.astype(np.int64)).astype(np.float32)
+    jj, ww = pesos_de(P)
+    return P, F, n, np.array(UV, np.float32), jj, ww
 
 
 # ---------------------------------------------------------- subdivisão
@@ -1042,7 +1162,8 @@ def contexto(d, v, f, uv, fuv, n, r, pos, w, a, grau, cab, rot):
         bochecha=superficie(olho_c[0] + 0.012, olho_c[1] - 0.035).astype(np.float32),
         mamilo=mamilo.astype(np.float32), queixo=superficie(0.0, boca[1] - 0.045, 0.008).astype(np.float32),
         maca_y=float(olho_c[1] - 0.022), centro_cabeca=centro.astype(np.float32),
-        testa_y=float(olho_c[1] + 0.074),
+        # linha do cabelo mais baixa: o cabelo vem para a frente da testa
+        testa_y=float(olho_c[1] + 0.058),
     )
     roupa = r["calcao"][f].all(1) | r["bota"][f].all(1)
     fecha = para_gltf(d["expressoes"][list(EXPRESSOES).index("apagado")])
@@ -1106,7 +1227,10 @@ def construir(pintar=True):
         "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 0.34})
     mat_cinto = glb.material(name="Cinturao", pbrMetallicRoughness={
         "baseColorTexture": {"index": glb.imagem(textura_do_cinturao(), "JPEG")},
-        "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.15, "roughnessFactor": 0.32})
+        "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.15, "roughnessFactor": 0.40})
+    mat_placa = glb.material(name="Placa", pbrMetallicRoughness={
+        "baseColorTexture": {"index": glb.imagem(textura_da_placa(), "JPEG")},
+        "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.35, "roughnessFactor": 0.22})
     if pintar:
         tp = glb.imagem(img_pele, "JPEG")
         tn = glb.imagem(img_relevo, "PNG")
@@ -1189,6 +1313,8 @@ def construir(pintar=True):
 
     cp, cf, cn, cuv, cj, cw = cinturao(cv, r["cintura"], pesos_de)
     malhas.append(("Cinturao", glb.malha("Cinturao", cp, cn, cf, mat_cinto, uv=cuv, juntas=cj, pesos=cw)))
+    pp, pf, pn, puv, pj, pw = placa_do_cinturao(cp, r["cintura"], pesos_de)
+    malhas.append(("Placa", glb.malha("Placa", pp, pn, pf, mat_placa, uv=puv, juntas=pj, pesos=pw)))
     for lado in ("Left", "Right"):
         bp, bf, bn, bc, bw, _ = bota(pos, lado)
         bj, bw4 = top4(bw)

@@ -17,11 +17,10 @@ from scipy.ndimage import gaussian_filter
 
 RAIZ = os.path.join(os.path.dirname(__file__), "..")
 PASTA = os.path.join(RAIZ, "assets", "lutador3d")
-PINTURA = os.path.join(PASTA, "boxeador_1.jpg")
-RELEVO_ORIGINAL = os.path.join(PASTA, "boxeador_2.png")
+MODELO = os.path.join(PASTA, "boxeador.glb")
 
 # Força do relevo dos músculos (derivada da luminância da pintura).
-FORCA_MUSCULO = 4.0
+FORCA_MUSCULO = 1.5
 FORCA_DETALHE = 0.0
 TAM = 2048
 
@@ -47,8 +46,31 @@ def de_png(im):
     return a / np.maximum(np.linalg.norm(a, axis=2, keepdims=True), 1e-6)
 
 
+def imagens_da_pele():
+    """A pintura e o relevo da pele, lidos direto do boxeador.glb (o
+    material "Pele"): não depende da ordem dos arquivos extraídos."""
+    import io
+    import json
+    import struct
+    dados = open(MODELO, "rb").read()
+    tam_json = struct.unpack("<I", dados[12:16])[0]
+    js = json.loads(dados[20:20 + tam_json])
+    ini = 20 + tam_json
+    binario = dados[ini + 8:ini + 8 + struct.unpack("<I", dados[ini:ini + 4])[0]]
+    mat = next(m for m in js["materials"] if m["name"] == "Pele")
+
+    def imagem(indice_textura):
+        img = js["images"][js["textures"][indice_textura]["source"]]
+        bv = js["bufferViews"][img["bufferView"]]
+        o = bv.get("byteOffset", 0)
+        return Image.open(io.BytesIO(binario[o:o + bv["byteLength"]]))
+
+    return imagem(mat["pbrMetallicRoughness"]["baseColorTexture"]["index"]), imagem(mat["normalTexture"]["index"])
+
+
 def relevo():
-    pintura = np.asarray(Image.open(PINTURA).convert("RGB").resize((TAM, TAM), Image.LANCZOS), dtype=np.float32) / 255.0
+    img_pintura, img_relevo = imagens_da_pele()
+    pintura = np.asarray(img_pintura.convert("RGB").resize((TAM, TAM), Image.LANCZOS), dtype=np.float32) / 255.0
     lum = pintura @ np.array([0.30, 0.55, 0.15], dtype=np.float32)
     # Cabelo, sobrancelha, cílios e mamilos são ESCUROS na pintura, mas não
     # são buracos: sem isto viravam sulcos fundos e as bordas deles
@@ -64,7 +86,7 @@ def relevo():
     # Pele escura na pintura = reentrância (vão entre músculos).
     altura = musculo * FORCA_MUSCULO + detalhe * FORCA_DETALHE
     n_det = normal_de_altura(altura, 60.0)
-    base = de_png(Image.open(RELEVO_ORIGINAL).resize((TAM, TAM), Image.BICUBIC))
+    base = de_png(img_relevo.resize((TAM, TAM), Image.BICUBIC))
     # Mistura "reorientada" simplificada: soma as inclinações.
     n = np.dstack([base[..., 0] + n_det[..., 0], base[..., 1] + n_det[..., 1], base[..., 2] * n_det[..., 2]])
     n /= np.linalg.norm(n, axis=2, keepdims=True)

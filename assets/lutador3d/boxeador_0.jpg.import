@@ -2,25 +2,23 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bu67paaqc45kl"
-path.s3tc="res://.godot/imported/boxeador_0.jpg-71776e77fcbdf85009acf2b01cbb90b2.s3tc.ctex"
-path.etc2="res://.godot/imported/boxeador_0.jpg-71776e77fcbdf85009acf2b01cbb90b2.etc2.ctex"
+uid="uid://ccj135j42i8qx"
+path="res://.godot/imported/boxeador_0.jpg-71776e77fcbdf85009acf2b01cbb90b2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc", "etc2_astc"],
-"vram_texture": true
+"vram_texture": false
 }
 generator_parameters={
-"md5": "692e26ec5e01a40ace1470a970160422"
+"md5": "fbb83d1de72baaf4813461c9ecfd16e1"
 }
 
 [deps]
 
 source_file="res://assets/lutador3d/boxeador_0.jpg"
-dest_files=["res://.godot/imported/boxeador_0.jpg-71776e77fcbdf85009acf2b01cbb90b2.s3tc.ctex", "res://.godot/imported/boxeador_0.jpg-71776e77fcbdf85009acf2b01cbb90b2.etc2.ctex"]
+dest_files=["res://.godot/imported/boxeador_0.jpg-71776e77fcbdf85009acf2b01cbb90b2.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -41,5 +39,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=2048
+process/size_limit=0
 detect_3d/compress_to=1

@@ -166,10 +166,10 @@ func _despertar_passo(agora: int) -> bool:
 	_proxima_etapa_ms = agora + DESPERTAR_PASSO_MS
 	match _etapa_despertar:
 		0:
-			Diario.marca("CAMERA: ponte Android")
+			_registro("ponte Android")
 			_preparar_android_usb()
 		1:
-			Diario.marca("CAMERA: servidor de camera")
+			_registro("servidor de camera")
 			_ligar_servidor()
 		2:
 			if OS.get_name() != "Android":
@@ -183,7 +183,7 @@ func _despertar_passo(agora: int) -> bool:
 			# abre a câmera depois de confirmar a permissão.
 			_ja_montada = true
 			_etapa_despertar = -1
-			Diario.marca("CAMERA: pronta")
+			_registro("pronta")
 			return false
 	_etapa_despertar += 1
 	return true
@@ -235,15 +235,15 @@ func _passo_das_permissoes(agora: int) -> bool:
 	if _tem_permissao_da_camera():
 		_permissoes_ok = true
 		status = "CÂMERA AUTORIZADA — ABRINDO…"
-		Diario.marca("CAMERA: permissao ok, abrindo")
+		_registro("permissao ok, abrindo")
 		_ligar_servidor()
 		if enabled:
 			iniciar_captura()
-		Diario.marca("CAMERA: abertura pedida")
+		_registro("abertura pedida")
 		return true
 	if not _permissoes_pedidas:
 		_permissoes_pedidas = true
-		Diario.marca("CAMERA: sem permissao (negada no carregamento)")
+		_registro("sem permissao (negada no carregamento)")
 	status = "CÂMERA SEM PERMISSÃO — AUTORIZE NAS CONFIGURAÇÕES DO ANDROID"
 	return false
 
@@ -281,6 +281,12 @@ var _caca_desde_ms := 0
 const CACA_PONTE_MS := 15000
 const CACA_SERVIDOR_MS := 12000
 
+## Cada passo da câmera vai para o diário da abertura E para o logcat do
+## Android (etiqueta "godot"): o CAMERA_TVBOX.bat junta tudo num relatório.
+func _registro(texto: String) -> void:
+	Diario.marca("CAMERA: " + texto)
+	print("[CAMERA] ", texto)
+
 func _servidor_proibido() -> bool:
 	return OS.get_name() == "Android" and _caca != Caca.SERVIDOR
 
@@ -292,6 +298,11 @@ func _cacar_camera_android(agora: int) -> void:
 		# A contagem do plugin sai em segundo plano: dá 1,5 s para ela.
 		if _caca_desde_ms == 0:
 			_caca_desde_ms = agora
+			# O RELATÓRIO COMPLETO, uma vez: o que o Android vê de câmera,
+			# de USB e de permissão — vai para o logcat.
+			if _ponte_tem("getCameraReport"):
+				for linha in str(_android_bridge.call("getCameraReport")).split("\n", false):
+					print("[CAMERA] relatorio: ", linha)
 		var classicas := int(_android_bridge.call("getSystemCameraCount")) if _ponte_tem("getSystemCameraCount") else 0
 		if classicas > 0:
 			_mudar_caca(Caca.PONTE, agora, "%d camera(s) classica(s)" % classicas)
@@ -315,16 +326,16 @@ func _mudar_caca(nova: Caca, agora: int, porque: String) -> void:
 	_caca = nova
 	_caca_desde_ms = agora
 	if nova == Caca.SERVIDOR:
-		Diario.marca("CAMERA: CameraServer (%s)" % porque)
+		_registro("CameraServer (%s)" % porque)
 		# Solta a webcam do plugin antes: um dono de cada vez.
 		_parar_uvc_android()
 		_uvc_teve_video = false
 		_ligar_servidor()
-		Diario.marca("CAMERA: CameraServer ligado, %d camera(s)" % CameraServer.feeds().size())
+		_registro("CameraServer ligado, %d camera(s)" % CameraServer.feeds().size())
 		_proxima_busca_ms = 0
 		status = "PROCURANDO A WEBCAM (CAMERA2)…"
 	else:
-		Diario.marca("CAMERA: plugin (%s)" % porque)
+		_registro("plugin (%s)" % porque)
 		_parar_feed()
 		if CameraServer.has_method("set_monitoring_feeds"):
 			CameraServer.call("set_monitoring_feeds", false)
@@ -471,7 +482,7 @@ func _vigiar_webcam_android(agora: int) -> void:
 		_uvc_proximo_religar_ms = agora + 3000
 		_android_bridge.call("startUvcCamera")
 		if _ponte_tem("getUvcStatus"):
-			Diario.marca("CAMERA: " + str(_android_bridge.call("getUvcStatus")))
+			_registro("" + str(_android_bridge.call("getUvcStatus")))
 		_requisitar_webcam_usb_android(true)
 		return
 	if _uvc_parada:
@@ -791,6 +802,8 @@ func _abrir_feed_disponivel() -> void:
 	if selected_index < 0:
 		return
 	_feed = feeds[selected_index]
+	if OS.get_name() == "Android":
+		_registro("Camera2 abrindo '%s' (%d na lista)" % [_nome_do_feed(_feed), feeds.size()])
 	_selecionar_formato_estavel()
 	_feed.set_active(true)
 	_texture = CameraTexture.new()

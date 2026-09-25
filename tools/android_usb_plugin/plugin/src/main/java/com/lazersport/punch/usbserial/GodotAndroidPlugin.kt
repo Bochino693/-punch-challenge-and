@@ -75,7 +75,17 @@ class GodotAndroidPlugin(godot: Godot) : GodotPlugin(godot),
     @Volatile private var serialPort: UsbSerialPort? = null
     @Volatile private var ioManager: SerialInputOutputManager? = null
     @Volatile private var lastError = ""
-    @Volatile private var cameraStatus = "Câmera USB ainda não consultada"
+    // Cada mudança do estado da câmera vai também para o logcat (etiqueta
+    // PunchCamera): o CAMERA_TVBOX.bat recolhe tudo num relatório só.
+    @Volatile private var cameraStatusValor = "Câmera USB ainda não consultada"
+    private var cameraStatus: String
+        get() = cameraStatusValor
+        set(valor) {
+            if (valor != cameraStatusValor) {
+                cameraStatusValor = valor
+                try { android.util.Log.i("PunchCamera", valor) } catch (_: Throwable) { }
+            }
+        }
     private val cameraFrameLock = Any()
     @Volatile private var cameraClient: MultiCameraClient? = null
     @Volatile private var activeCamera: MultiCameraClient.Camera? = null
