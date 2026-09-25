@@ -45,7 +45,7 @@ if (Test-Path $ApkEsperado) {
     Remove-Item -LiteralPath $ApkEsperado -Force
 }
 
-Write-Host "Projeto confirmado: Super Boxing (Punch Challenge) - build 89" -ForegroundColor Green
+Write-Host "Projeto confirmado: Super Boxing (Punch Challenge) - build 90" -ForegroundColor Green
 
 # ------------------------------------------------------------------
 # ESPACO EM DISCO. Sem espaco o Gradle falha no meio ("Espaco insuficiente

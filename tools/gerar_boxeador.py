@@ -483,7 +483,7 @@ def cabelo(v, n, f, w, pontos, semente=7):
     # sementes das mechas: amostragem espalhada (a mais longe primeiro)
     escolha = [int(np.argmax(pts[:, 1]))]
     dist = np.linalg.norm(pts - pts[escolha[0]], axis=1)
-    for _ in range(40):
+    for _ in range(64):
         k = int(np.argmax(dist))
         escolha.append(k)
         dist = np.minimum(dist, np.linalg.norm(pts - pts[k], axis=1))
@@ -492,22 +492,29 @@ def cabelo(v, n, f, w, pontos, semente=7):
         p0, n0 = pts[k], nrm[k] / max(np.linalg.norm(nrm[k]), 1e-6)
         r0 = p0 - cab_c
         frente = np.cos(np.arctan2(r0[0], r0[2]))
+        # CABELO ONDULADO, DEITADO NO COURO: cada mecha corre RENTE à
+        # cabeça (a direção é projetada no plano do couro), penteada para
+        # trás, e faz uma curva — duas meias-mechas em ângulo formam a onda.
+        # Na frente, a franja ondulada desce um pouco sobre a testa.
         if frente > 0.5 and p0[1] < testa_y + 0.05:
-            # FRANJA: mechas grossas saindo para a frente e caindo sobre a
-            # testa (sem furar a pele)
-            dirc = n0 * 0.6 + np.array([rng_.normal(0, 0.15), -0.55, 0.65])
-            comp = rng_.uniform(0.05, 0.075)
-            raio = rng_.uniform(0.022, 0.028)
+            alvo = np.array([rng_.normal(0, 0.25), -0.8, 0.35])
+            comp = rng_.uniform(0.035, 0.05)
+            raio = rng_.uniform(0.016, 0.020)
         else:
-            # o resto PENTEADO PARA TRÁS e para cima, em chamas
-            dirc = n0 * 0.8 + np.array([0.0, 0.35, -0.55]) + rng_.normal(0, 0.12, 3)
-            comp = rng_.uniform(0.07, 0.12)
-            raio = rng_.uniform(0.026, 0.034)
-        dirc /= np.linalg.norm(dirc)
-        base = p0 + n0 * 0.006
-        mechas.append((base, base + dirc * comp, raio))
-    lo = pts.min(0) - 0.13
-    hi = pts.max(0) + 0.13
+            alvo = np.array([rng_.normal(0, 0.2), 0.15, -1.0])
+            comp = rng_.uniform(0.05, 0.075)
+            raio = rng_.uniform(0.017, 0.022)
+        tang = alvo - n0 * alvo.dot(n0)
+        tang /= max(np.linalg.norm(tang), 1e-6)
+        lado = np.cross(n0, tang)
+        onda = rng_.choice([-1.0, 1.0]) * rng_.uniform(0.35, 0.6)
+        base = p0 + n0 * 0.010
+        meio = base + (tang + lado * onda) / np.linalg.norm(tang + lado * onda) * comp * 0.5 + n0 * 0.006
+        fim = meio + (tang - lado * onda) / np.linalg.norm(tang - lado * onda) * comp * 0.5 - n0 * 0.004
+        mechas.append((base, meio, raio))
+        mechas.append((meio, fim, raio * 0.8))
+    lo = pts.min(0) - 0.06
+    hi = pts.max(0) + 0.06
 
     def campo(P):
         forma = P.shape[:-1]
@@ -515,11 +522,11 @@ def cabelo(v, n, f, w, pontos, semente=7):
         d, _ = arvore.query(Q, k=1)
         casca = d - 0.013
         for a_, b_, r_ in mechas:
-            casca = _uniao(casca, _sd_cone_redondo(Q, a_, b_, r_, 0.002), 0.02)
+            casca = _uniao(casca, _sd_cone_redondo(Q, a_, b_, r_, r_ * 0.45), 0.012)
         return casca.reshape(forma)
 
     loc, faces, nrm_m = _malha_do_campo(campo, lo, hi, 0.0045)
-    # preto azulado, com as pontas e o alto mais claros (brilho de mangá)
+    # preto azulado, com o alto mais claro (brilho de mangá)
     alt = np.clip((loc[:, 1] - testa_y) / 0.14, 0, 1)
     cor = np.tile(np.array([0.035, 0.035, 0.05], np.float32), (len(loc), 1))
     cor += (alt[:, None] * np.array([0.05, 0.06, 0.12])).astype(np.float32)
@@ -900,7 +907,9 @@ def placa_do_cinturao(cp, cintura, pesos_de):
     UV.append([0.5, 0.5])
     for i in range(1, aneis + 1):
         t = i / aneis
-        bojo = 0.004 * (1 - t * t)
+        # abaulada no meio e com um ARO EM RELEVO perto da borda (o friso
+        # dourado de cinturão de campeão), e não um disco chapado
+        bojo = 0.010 * (1 - t * t) + 0.0045 * np.exp(-((t - 0.90) / 0.045) ** 2)
         for k in range(lados):
             a_ = 2 * np.pi * k / lados
             c, s_ = np.cos(a_), np.sin(a_)

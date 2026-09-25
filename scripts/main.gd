@@ -892,6 +892,9 @@ func _ready() -> void:
 	fx.montar(self)
 	_montar_escudo()
 	fx.aquecer()
+	# O logo da transição do START carregado já aqui: carregar na hora
+	# travava o primeiro quadro do efeito.
+	Logos.aquecer()
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
@@ -5268,37 +5271,46 @@ func _draw_transicao() -> void:
 	var largura := 1500.0
 	var x := lerpf(-largura, TELA.x + largura, avanco)
 	var inclinacao := 260.0
-	var faixa := PackedVector2Array([
-		Vector2(x - largura * 0.5 + inclinacao, -20.0),
-		Vector2(x + largura * 0.5 + inclinacao, -20.0),
-		Vector2(x + largura * 0.5 - inclinacao, TELA.y + 20.0),
-		Vector2(x - largura * 0.5 - inclinacao, TELA.y + 20.0),
-	])
-	Traco.poligono(self, faixa, Color("1a0b33"))
-	# o miolo com a mesma luz magenta do jogo, de cima para baixo
-	var miolo := PackedVector2Array([
-		Vector2(x - largura * 0.30 + inclinacao, -20.0), Vector2(x + largura * 0.30 + inclinacao, -20.0),
-		Vector2(x + largura * 0.30 - inclinacao, TELA.y + 20.0), Vector2(x - largura * 0.30 - inclinacao, TELA.y + 20.0),
-	])
-	draw_polygon(miolo, PackedColorArray([Color("7a0f55"), Color("7a0f55"), Color("2a0d45"), Color("2a0d45")]))
-	# Um fio de ouro na borda de ataque: é ele que dá velocidade ao gesto.
-	draw_line(
-		Vector2(x + largura * 0.5 + inclinacao, -20.0),
-		Vector2(x + largura * 0.5 - inclinacao, TELA.y + 20.0),
-		Paleta.AMBAR, 8.0, true
-	)
-	draw_line(
-		Vector2(x - largura * 0.5 + inclinacao, -20.0),
-		Vector2(x - largura * 0.5 - inclinacao, TELA.y + 20.0),
-		Color(Paleta.AMBAR, 0.55), 4.0, true
-	)
-	# O alvo viaja montado na faixa. É a mesma marca do jogo, e é o que
-	# faz a cortina pertencer a ESTA máquina e não a qualquer uma.
+	var topo := -20.0
+	var base := TELA.y + 20.0
+	var e := x - largura * 0.5
+	var d := x + largura * 0.5
+	# AS CORES DO JOGO: magenta vivo no miolo escurecendo para o roxo da
+	# abertura, como o letreiro e o botão START.
+	draw_polygon(PackedVector2Array([
+		Vector2(e + inclinacao, topo), Vector2(d + inclinacao, topo),
+		Vector2(d - inclinacao, base), Vector2(e - inclinacao, base),
+	]), PackedColorArray([Color("d91283"), Color("d91283"), Color("3a0f5e"), Color("3a0f5e")]))
+	# As duas bordas com a FAIXA ZEBRADA amarela e preta da moldura da
+	# arena, e um fio de ouro — a cortina é da mesma máquina.
+	for borda in [[e, 1.0], [d, -1.0]]:
+		_zebra_diagonal(float(borda[0]), float(borda[1]), inclinacao, topo, base)
 	# O LOGO DO JOGO viaja montado na faixa, nítido (versão do tamanho
-	# certo) — a cortina é desta máquina.
+	# certo).
 	var centro := Vector2(x, TELA.y * 0.5)
 	if centro.x > -400.0 and centro.x < TELA.x + 400.0:
-		ArcadeStage.imagem(self, ArcadeStage.LOGO, centro, 560.0)
+		ArcadeStage.imagem(self, ArcadeStage.LOGO, centro, 600.0)
+
+## Uma borda zebrada (amarelo/preto) ao longo da diagonal da cortina.
+## `lado` 1 = a faixa fica à direita da linha; -1 = à esquerda.
+func _zebra_diagonal(x_borda: float, lado: float, inclinacao: float, topo: float, base: float) -> void:
+	const LARG := 34.0
+	const PASSO := 64.0
+	var altura := base - topo
+	var n := int(ceil(altura / PASSO))
+	for k in n:
+		var y0 := topo + float(k) * PASSO
+		var y1 := minf(y0 + PASSO, base)
+		var f0 := (y0 - topo) / altura
+		var f1 := (y1 - topo) / altura
+		var x0 := x_borda + inclinacao * (1.0 - 2.0 * f0)
+		var x1 := x_borda + inclinacao * (1.0 - 2.0 * f1)
+		var cor := Paleta.AMBAR if k % 2 == 0 else Color("120a1c")
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x0, y0), Vector2(x0 + LARG * lado, y0 + 14.0),
+			Vector2(x1 + LARG * lado, y1 + 14.0), Vector2(x1, y1),
+		]), cor)
+	draw_line(Vector2(x_borda + inclinacao, topo), Vector2(x_borda - inclinacao, base), Paleta.AMBAR, 5.0, true)
 
 ## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
 ## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
@@ -5638,7 +5650,7 @@ func _draw_troca_saindo(s: float) -> void:
 	if k > 0.01:
 		var c := PLACA_DO_PLACAR.get_center()
 		draw_set_transform(c * (1.0 - k), 0.0, Vector2(k, k))
-		_cartao(PLACA_DO_PLACAR, Color("140c21"), _troca_cor, 1.0, 4.0)
+		_placa_arcade(PLACA_DO_PLACAR, _troca_cor, 1.0, 0.0)
 		_placar(_troca_placar, CENTRO_DO_PLACAR, Color.WHITE, PLACAR_NA_ARENA)
 		var vt := verdict_time
 		verdict_time = 0.0
@@ -5923,13 +5935,15 @@ func _pontos_do_capitulo(capitulo: int, alpha := 1.0) -> void:
 		draw_circle(centro, 8.0 if atual else 5.0, Color(cor, alpha), true, -1.0, true)
 
 ## A PLAQUETA DO PLACAR, montada a cavaleiro na borda de baixo da moldura.
-const PLACA_DO_PLACAR := Rect2(268.0, 1214.0, 544.0, 200.0)
+## NO ALTO DA ARENA, logo abaixo das barras de vida, em cima da torcida:
+## no meio do quadro ela cobria o corpo e o rosto do lutador.
+const PLACA_DO_PLACAR := Rect2(300.0, 318.0, 480.0, 178.0)
 ## O centro do número dentro da plaqueta.
-const CENTRO_DO_PLACAR := Vector2(540.0, 1276.0)
+const CENTRO_DO_PLACAR := Vector2(540.0, 372.0)
 ## A faixa do veredito, abaixo do quadro.
 const VEREDITO_TOPO := 1626.0
 const VEREDITO_BASE := 1788.0
-const PLACAR_NA_ARENA := 128
+const PLACAR_NA_ARENA := 112
 
 func _draw_score_hero() -> void:
 	var measuring := state == GameDef.State.MEASURING
@@ -5959,11 +5973,11 @@ func _draw_score_hero() -> void:
 	if _perdeu_sem_soco():
 		# NOCAUTEADO SEM SOCAR: nada de placar "0000" (lia como um soco
 		# fraco contado). A plaqueta diz o que aconteceu.
-		_cartao(PLACA_DO_PLACAR, Color("140c21"), Paleta.VERMELHO, 1.0, 4.0)
+		_placa_arcade(PLACA_DO_PLACAR, Paleta.VERMELHO, 1.0, 0.25)
 		_placar("K.O.", CENTRO_DO_PLACAR, Paleta.VERMELHO, PLACAR_NA_ARENA)
 		_apoio("NENHUM SOCO CONTADO", PLACA_DO_PLACAR.end.y - 18.0, Color.WHITE)
 	else:
-		_cartao(PLACA_DO_PLACAR, Color("140c21"), cor, 1.0, 4.0)
+		_placa_arcade(PLACA_DO_PLACAR, cor, 1.0, 0.0)
 		_placar(
 			"– – – –" if measuring else "%04d" % int(round(displayed_score)),
 			CENTRO_DO_PLACAR, cor if measuring else Color.WHITE, PLACAR_NA_ARENA
@@ -6009,7 +6023,8 @@ func _draw_score_hero() -> void:
 ## comparar à distância que um retângulo contínuo e não criam partículas,
 ## shaders ou nós novos por quadro.
 func _draw_barra_de_pontuacao(valor: float, contagem: float, cor: Color, medindo: bool) -> void:
-	var trilho := Rect2(304.0, PLACA_DO_PLACAR.position.y + 118.0, 472.0, 24.0)
+	var trilho := Rect2(PLACA_DO_PLACAR.position.x + 40.0, PLACA_DO_PLACAR.position.y + 112.0,
+		PLACA_DO_PLACAR.size.x - 80.0, 22.0)
 	_cartao(trilho.grow(6.0), Color("0f0a18"), Color(cor, 0.34), 1.0, 2.0)
 	var segmentos := 24
 	var vao := 3.0
